@@ -1,0 +1,9 @@
+{
+  "source_folder_id": "PUT_YOUR_SOURCE_FOLDER_ID_HERE",
+  "output_folder_id": "PUT_YOUR_OUTPUT_FOLDER_ID_HERE",
+  "service_account_file": "service_account.json",
+  "openai_model": "whisper-1",
+  "chunk_minutes": 20,
+  "video_mime_prefixes": ["video/"],
+  "poll_page_size": 25
+}
