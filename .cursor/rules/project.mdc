@@ -1,0 +1,13 @@
+---
+description: Drive transcriber project context
+alwaysApply: true
+---
+
+# drive-transcriber
+
+Python tool that watches a Google Drive folder for new videos and transcribes them locally with faster-whisper, writing `.txt` files to a `Transcripts` subfolder.
+
+- Entry point: `main.py` (use `python main.py --auth` once for OAuth setup)
+- Config: `config.json` overrides defaults from `config.example.json`; folder IDs required
+- Secrets: `credentials.json`, `token.json` (gitignored, never commit)
+- Stack: Google Drive API via OAuth, ffmpeg, faster-whisper (CUDA on Windows via pip nvidia libs)

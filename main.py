@@ -17,6 +17,7 @@ import tempfile
 import traceback
 
 from drive_client import (
+    authorize_oauth,
     get_drive_service,
     list_unprocessed_videos,
     download_file,
@@ -29,9 +30,34 @@ from drive_client import (
 from transcribe import transcribe_video
 
 
+EXAMPLE_CONFIG_NAME = "config.example.json"
+
+
 def load_config(path: str) -> dict:
+    """Load config.example.json defaults, then overlay the user's config.json.
+
+    Your config.json only needs the values you want to override (folder IDs,
+    etc.) -- new keys added to config.example.json in future updates are picked
+    up automatically without editing config.json.
+    """
+    base_dir = os.path.dirname(os.path.abspath(path)) or os.getcwd()
+    example_path = os.path.join(base_dir, EXAMPLE_CONFIG_NAME)
+
+    cfg = {}
+    if os.path.isfile(example_path):
+        with open(example_path) as f:
+            cfg = json.load(f)
+
+    if not os.path.isfile(path):
+        raise FileNotFoundError(
+            f"{path} not found. Create it with your folder IDs "
+            f"(see {EXAMPLE_CONFIG_NAME} for all available options)."
+        )
+
     with open(path) as f:
-        return json.load(f)
+        cfg.update(json.load(f))
+
+    return cfg
 
 
 def process_file(service, file_info: dict, output_folder_id: str, cfg: dict):
@@ -47,8 +73,9 @@ def process_file(service, file_info: dict, output_folder_id: str, cfg: dict):
         transcript_text = transcribe_video(
             video_path,
             work_dir=work_dir,
-            chunk_minutes=cfg.get("chunk_minutes", 20),
-            model=cfg.get("openai_model", "whisper-1"),
+            model=cfg["whisper_model"],
+            device=cfg["device"],
+            compute_type=cfg["compute_type"],
         )
 
         transcript_path = os.path.join(work_dir, "transcript.txt")
@@ -66,7 +93,7 @@ def process_file(service, file_info: dict, output_folder_id: str, cfg: dict):
     except Exception:
         print(f"[{name}] FAILED:")
         traceback.print_exc()
-        # Mark failed so it doesn't retry forever and silently burn API credits.
+        # Mark failed so it doesn't retry forever on every poll cycle.
         # Delete this appProperty on the Drive file manually (or change status)
         # to force a retry once you've fixed the underlying issue.
         mark_status(service, file_id, STATUS_FAILED)
@@ -77,7 +104,7 @@ def process_file(service, file_info: dict, output_folder_id: str, cfg: dict):
 
 def run(config_path: str):
     cfg = load_config(config_path)
-    service = get_drive_service(cfg["service_account_file"])
+    service = get_drive_service(cfg)
 
     output_folder_id = find_or_create_folder(
         service, "Transcripts", cfg["output_folder_id"]
@@ -86,8 +113,8 @@ def run(config_path: str):
     videos = list_unprocessed_videos(
         service,
         cfg["source_folder_id"],
-        cfg.get("video_mime_prefixes", ["video/"]),
-        cfg.get("poll_page_size", 25),
+        cfg["video_mime_prefixes"],
+        cfg["poll_page_size"],
     )
 
     if not videos:
@@ -100,5 +127,11 @@ def run(config_path: str):
 
 
 if __name__ == "__main__":
-    config_path = sys.argv[1] if len(sys.argv) > 1 else "config.json"
-    run(config_path)
+    if len(sys.argv) >= 2 and sys.argv[1] == "--auth":
+        config_path = sys.argv[2] if len(sys.argv) > 2 else "config.json"
+        cfg = load_config(config_path)
+        authorize_oauth(cfg["credentials_file"], cfg["token_file"])
+        print(f"Authorized. Token saved to {cfg['token_file']}")
+    else:
+        config_path = sys.argv[1] if len(sys.argv) > 1 else "config.json"
+        run(config_path)

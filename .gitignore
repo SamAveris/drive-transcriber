@@ -1,1 +1,6 @@
-`` service_account.json config.json *.log __pycache__/ ``
+service_account.json
+credentials.json
+token.json
+config.json
+*.log
+__pycache__/
