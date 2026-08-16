@@ -1,7 +1,7 @@
 """
 Video -> audio -> transcript.
 
-Supports local faster-whisper (default) or OpenAI Whisper API (pilot).
+Supports OpenAI Whisper API (default) or local faster-whisper.
 Audio is always extracted locally with ffmpeg before transcription.
 """
 
@@ -65,7 +65,7 @@ def transcribe_video(video_path: str, work_dir: str, cfg: dict) -> TranscriptRes
     audio_path = os.path.join(work_dir, "audio.mp3")
     extract_audio(video_path, audio_path)
 
-    backend = cfg.get("transcription_backend", "local")
+    backend = cfg.get("transcription_backend", "openai")
     if backend == "openai":
         from transcribe_openai import transcribe_audio
 

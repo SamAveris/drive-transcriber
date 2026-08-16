@@ -124,7 +124,7 @@ def run_local_file(video_path: str, config_path: str):
     if not os.path.isfile(video_path):
         raise FileNotFoundError(video_path)
 
-    backend = cfg.get("transcription_backend", "local")
+    backend = cfg.get("transcription_backend", "openai")
     print(f"Backend: {backend}")
     print(f"Extracting audio locally, then transcribing...")
 

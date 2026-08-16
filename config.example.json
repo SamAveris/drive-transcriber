@@ -4,7 +4,7 @@
   "auth": "oauth",
   "credentials_file": "credentials.json",
   "token_file": "token.json",
-  "transcription_backend": "local",
+  "transcription_backend": "openai",
   "openai_model": "whisper-1",
   "chunk_minutes": 20,
   "output_formats": ["txt", "srt"],

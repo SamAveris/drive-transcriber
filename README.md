@@ -1,8 +1,8 @@
 # Drive Video Transcriber
 
-Watches a Google Drive folder for new videos and automatically transcribes
-them using local faster-whisper, writing each transcript back to a
-`Transcripts` subfolder in Drive.
+Watches a Google Drive folder for new videos, extracts audio locally with
+ffmpeg, transcribes via the **OpenAI Whisper API** by default, and writes
+`.txt` and `.srt` files to a `Transcripts` subfolder in Drive.
 
 Designed to run unattended on a schedule (cron, Task Scheduler, or a cloud
 scheduler) -- see "Scheduling it" below.
@@ -38,32 +38,27 @@ OAuth uses your account, so transcripts upload normally. Service account auth
 (`"auth": "service_account"` in config) remains available if you later move
 this to a Google Workspace **shared drive**.
 
-## 2. Transcription model (local, no account needed)
+## 2. Set up OpenAI transcription
 
-Transcription runs entirely on your own machine via `faster-whisper` -- no
-API key, no per-minute cost, no account to set up. The first time the
-script runs, it downloads the model weights from Hugging Face (a one-time
-download, cached locally afterward). After that it works offline.
+Transcription uses the OpenAI Whisper API (`whisper-1` by default). Audio is
+still extracted on your machine with ffmpeg -- only the speech-to-text step
+runs in the cloud.
 
-**You have an NVIDIA GPU, so use it** -- it's dramatically faster than CPU
-and lets you comfortably run the larger, more accurate models:
+1. Add billing/credits at https://platform.openai.com and create an API key.
+2. Set the environment variable wherever the script runs:
+   ```powershell
+   $env:OPENAI_API_KEY = "sk-..."
+   ```
+   To persist on Windows:
+   ```powershell
+   [System.Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "sk-...", "User")
+   ```
+   Restart the terminal (or Cursor) after persisting.
 
-1. Confirm your GPU and driver are visible: open PowerShell and run `nvidia-smi`. It should print your GPU name and a driver/CUDA version in the top-right of the output. If this command isn't found, install the latest driver from nvidia.com/drivers first.
-2. The `requirements.txt` already includes `nvidia-cublas-cu12` and `nvidia-cudnn-cu12` -- these are the CUDA runtime libraries faster-whisper needs, installed via pip so you don't need the full NVIDIA CUDA Toolkit. `transcribe.py` automatically registers their DLL locations on Windows at startup, so no manual PATH edits are needed.
-3. In `config.json`, keep `"device": "cuda"` and `"compute_type": "float16"`.
-
-| Model       | Notes                                                   |
-|-------------|----------------------------------------------------------|
-| `base`      | Fast even on CPU; underuses a good GPU                  |
-| `small`     | Good quality, very fast on GPU                          |
-| `medium`    | **Good default for a gaming GPU** -- strong accuracy, still quick |
-| `large-v3`  | Best accuracy; noticeably slower even on GPU, worth it for tricky audio |
-
-If `nvidia-smi` isn't available or you ever want to fall back to CPU-only
-(e.g. running this on a different, GPU-less machine later), just set
-`"device": "cpu"` and `"compute_type": "int8"` in `config.json` -- no code
-changes needed, and `base` or `small` are the more realistic model choices
-in that case.
+Default model is `whisper-1` ($0.006/min). Alternatives in config:
+`gpt-4o-mini-transcribe` (cheaper), `gpt-4o-transcribe` (higher accuracy).
+Long audio is chunked automatically (`chunk_minutes`, default 20) to stay
+under OpenAI's 25MB upload limit.
 
 ## 3. Install and configure
 
@@ -81,16 +76,16 @@ minimum that's your two Drive folder IDs:
 }
 ```
 
-Everything else comes from `config.example.json` automatically (model size,
-GPU settings, poll size, etc.). When this repo adds new config options, you
-don't have to touch `config.json` unless you want to override the new
-default.
+Everything else comes from `config.example.json` automatically (OpenAI
+model, output formats, poll size, etc.). When this repo adds new config
+options, you don't have to touch `config.json` unless you want to override
+the new default.
 
 See `config.example.json` for the full list of available options and their
 defaults. Common overrides beyond the folder IDs:
-- `service_account_file` -- path to the JSON key from step 1 (defaults to `service_account.json`).
-- `whisper_model` -- faster-whisper model size (`medium` is the default).
-- `device` / `compute_type` -- set to `cpu` / `int8` if you're not using a GPU.
+- `openai_model` -- `whisper-1` (default), `gpt-4o-mini-transcribe`, etc.
+- `output_formats` -- `["txt", "srt"]` by default.
+- `transcription_backend` -- set to `"local"` for GPU faster-whisper instead.
 
 ## 4. Test it manually first
 
@@ -98,10 +93,18 @@ defaults. Common overrides beyond the folder IDs:
 python main.py
 ```
 
-You should see it list any unprocessed videos, transcribe them, and drop
-`.txt` files into the `Transcripts` subfolder.
+Or test a local video without Drive:
+
+```powershell
+python main.py --local-file "C:\path\to\video.mp4"
+```
+
+Outputs land in Drive (`Transcripts/`) or locally in `pilot_output/`.
 
 ## 5. Scheduling it (the "automatic" part)
+
+Ensure `OPENAI_API_KEY` is set in the environment for the scheduled task
+(Task Scheduler → Environment variables, or set system-wide).
 
 **Option A -- cron on a machine that's always on (simplest):**
 ```bash
@@ -120,51 +123,35 @@ it on a schedule with Cloud Scheduler. This avoids needing a personal
 machine running 24/7. I'm happy to build the Dockerfile and deployment
 config if you want to go this route -- just say the word.
 
-## OpenAI Whisper API pilot (local ffmpeg + cloud transcription)
+## Local GPU transcription (optional)
 
-Audio is always extracted on your machine with ffmpeg. Set
-`transcription_backend` to `openai` to send the audio to OpenAI instead of
-running faster-whisper locally.
+To run faster-whisper on your own GPU instead of the OpenAI API, set in
+`config.json`:
 
-1. Add billing/credits at https://platform.openai.com and create an API key.
-2. Set the environment variable:
-   ```powershell
-   $env:OPENAI_API_KEY = "sk-..."
-   ```
-3. In `config.json`:
-   ```json
-   {
-     "transcription_backend": "openai",
-     "openai_model": "whisper-1",
-     "output_formats": ["txt", "srt"]
-   }
-   ```
-4. Test on a local video (no Drive):
-   ```powershell
-   python main.py --local-file "C:\path\to\video.mp4"
-   ```
-   Writes `.txt` and `.srt` to the `pilot_output/` folder in the project
-   (override with `"local_output_dir"` in config).
+```json
+{
+  "transcription_backend": "local",
+  "whisper_model": "medium",
+  "device": "cuda",
+  "compute_type": "float16"
+}
+```
 
-Models: `whisper-1` (timestamps + SRT), `gpt-4o-mini-transcribe` (cheaper),
-`gpt-4o-transcribe` (higher accuracy). Long audio is chunked automatically
-(`chunk_minutes`, default 20) to stay under OpenAI's 25MB upload limit.
+Requires an NVIDIA GPU (`nvidia-smi`), CUDA libs in `requirements.txt`, and
+no per-minute API cost. Useful for offline use or if you want to keep audio
+off third-party servers.
 
-Switch back to local GPU transcription with `"transcription_backend": "local"`.
+| Model       | Notes                                                   |
+|-------------|----------------------------------------------------------|
+| `medium`    | Good default for a gaming GPU                           |
+| `large-v3`  | Best accuracy; slower even on GPU                         |
 
-## Notes on local processing
+## Notes
 
-- No per-minute cost and no internet needed after the first run (once the
-  model weights are cached). On your GPU, even the `medium` model should
-  transcribe noticeably faster than the video's actual runtime.
-- Since the whole job runs on your machine, keep an eye on GPU load if the
-  scheduled task overlaps with gaming or other GPU work at that time --
-  they'll compete for the same card.
+- **API cost:** ~$0.006/min with `whisper-1` -- check usage at
+  https://platform.openai.com/usage
 - If a video's audio track is silent/empty or the video has no audio stream,
   ffmpeg extraction will fail and the file will be marked `failed` --
   check `transcriber.log` (if using cron) for details.
-- If `faster-whisper` falls back to CPU speed unexpectedly (transcription
-  feels slow despite having a GPU), double check `nvidia-smi` still runs
-  and that `device`/`compute_type` in `config.json` are still set to
-  `cuda`/`float16` -- a typo here silently falls back to CPU rather than
-  erroring.
+- Drive filenames with colons (e.g. `07:55` from phone timestamps) are
+  sanitized automatically on Windows (`07-55`).
