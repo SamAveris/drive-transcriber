@@ -120,6 +120,38 @@ it on a schedule with Cloud Scheduler. This avoids needing a personal
 machine running 24/7. I'm happy to build the Dockerfile and deployment
 config if you want to go this route -- just say the word.
 
+## OpenAI Whisper API pilot (local ffmpeg + cloud transcription)
+
+Audio is always extracted on your machine with ffmpeg. Set
+`transcription_backend` to `openai` to send the audio to OpenAI instead of
+running faster-whisper locally.
+
+1. Add billing/credits at https://platform.openai.com and create an API key.
+2. Set the environment variable:
+   ```powershell
+   $env:OPENAI_API_KEY = "sk-..."
+   ```
+3. In `config.json`:
+   ```json
+   {
+     "transcription_backend": "openai",
+     "openai_model": "whisper-1",
+     "output_formats": ["txt", "srt"]
+   }
+   ```
+4. Test on a local video (no Drive):
+   ```powershell
+   python main.py --local-file "C:\path\to\video.mp4"
+   ```
+   Writes `.txt` and `.srt` to the `pilot_output/` folder in the project
+   (override with `"local_output_dir"` in config).
+
+Models: `whisper-1` (timestamps + SRT), `gpt-4o-mini-transcribe` (cheaper),
+`gpt-4o-transcribe` (higher accuracy). Long audio is chunked automatically
+(`chunk_minutes`, default 20) to stay under OpenAI's 25MB upload limit.
+
+Switch back to local GPU transcription with `"transcription_backend": "local"`.
+
 ## Notes on local processing
 
 - No per-minute cost and no internet needed after the first run (once the

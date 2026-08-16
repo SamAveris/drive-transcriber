@@ -7,6 +7,8 @@ Run/Functions, etc.) -- see README.md for setup and scheduling options.
 
 Usage:
     python main.py [path/to/config.json]
+    python main.py --local-file path/to/video.mp4
+    python main.py --auth
 """
 
 import json
@@ -27,6 +29,8 @@ from drive_client import (
     STATUS_DONE,
     STATUS_FAILED,
 )
+from filenames import safe_local_filename, sanitize_filename
+from formats.srt import segments_to_srt
 from transcribe import transcribe_video
 
 
@@ -60,6 +64,27 @@ def load_config(path: str) -> dict:
     return cfg
 
 
+def write_transcript_files(result, dest_dir: str, base_name: str, cfg: dict) -> dict[str, str]:
+    """Write transcript files under dest_dir. Returns {format: path}."""
+    os.makedirs(dest_dir, exist_ok=True)
+    output_formats = cfg.get("output_formats", ["txt"])
+    paths: dict[str, str] = {}
+
+    if "txt" in output_formats:
+        txt_path = os.path.join(dest_dir, f"{base_name}.txt")
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(result.text)
+        paths["txt"] = txt_path
+
+    if "srt" in output_formats:
+        srt_path = os.path.join(dest_dir, f"{base_name}.srt")
+        with open(srt_path, "w", encoding="utf-8") as f:
+            f.write(segments_to_srt(result.segments))
+        paths["srt"] = srt_path
+
+    return paths
+
+
 def process_file(service, file_info: dict, output_folder_id: str, cfg: dict):
     file_id = file_info["id"]
     name = file_info["name"]
@@ -67,25 +92,18 @@ def process_file(service, file_info: dict, output_folder_id: str, cfg: dict):
 
     work_dir = tempfile.mkdtemp(prefix="drive_transcriber_")
     try:
-        video_path = os.path.join(work_dir, name)
+        video_path = os.path.join(work_dir, safe_local_filename(name))
         download_file(service, file_id, video_path)
 
-        transcript_text = transcribe_video(
-            video_path,
-            work_dir=work_dir,
-            model=cfg["whisper_model"],
-            device=cfg["device"],
-            compute_type=cfg["compute_type"],
-        )
+        result = transcribe_video(video_path, work_dir=work_dir, cfg=cfg)
 
-        transcript_path = os.path.join(work_dir, "transcript.txt")
-        with open(transcript_path, "w") as f:
-            f.write(transcript_text)
-
-        base_name, _ = os.path.splitext(name)
-        upload_transcript(
-            service, transcript_path, f"{base_name}.txt", output_folder_id
-        )
+        base_name = sanitize_filename(os.path.splitext(name)[0])
+        outputs = write_transcript_files(result, work_dir, base_name, cfg)
+        for fmt, path in outputs.items():
+            upload_transcript(
+                service, path, os.path.basename(path), output_folder_id
+            )
+            print(f"[{name}] uploaded {fmt}")
 
         mark_status(service, file_id, STATUS_DONE)
         print(f"[{name}] done.")
@@ -93,11 +111,34 @@ def process_file(service, file_info: dict, output_folder_id: str, cfg: dict):
     except Exception:
         print(f"[{name}] FAILED:")
         traceback.print_exc()
-        # Mark failed so it doesn't retry forever on every poll cycle.
-        # Delete this appProperty on the Drive file manually (or change status)
-        # to force a retry once you've fixed the underlying issue.
         mark_status(service, file_id, STATUS_FAILED)
 
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def run_local_file(video_path: str, config_path: str):
+    """Pilot mode: transcribe a local video without touching Drive."""
+    cfg = load_config(config_path)
+    video_path = os.path.abspath(video_path)
+    if not os.path.isfile(video_path):
+        raise FileNotFoundError(video_path)
+
+    backend = cfg.get("transcription_backend", "local")
+    print(f"Backend: {backend}")
+    print(f"Extracting audio locally, then transcribing...")
+
+    work_dir = tempfile.mkdtemp(prefix="drive_transcriber_pilot_")
+    try:
+        result = transcribe_video(video_path, work_dir=work_dir, cfg=cfg)
+
+        out_dir = cfg.get("local_output_dir") or os.path.join(
+            os.path.dirname(os.path.abspath(config_path)), "pilot_output"
+        )
+        base_name = sanitize_filename(os.path.splitext(os.path.basename(video_path))[0])
+        outputs = write_transcript_files(result, out_dir, base_name, cfg)
+        for fmt, path in outputs.items():
+            print(f"Wrote {path}")
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -132,6 +173,10 @@ if __name__ == "__main__":
         cfg = load_config(config_path)
         authorize_oauth(cfg["credentials_file"], cfg["token_file"])
         print(f"Authorized. Token saved to {cfg['token_file']}")
+    elif len(sys.argv) >= 3 and sys.argv[1] == "--local-file":
+        video_path = sys.argv[2]
+        config_path = sys.argv[3] if len(sys.argv) > 3 else "config.json"
+        run_local_file(video_path, config_path)
     else:
         config_path = sys.argv[1] if len(sys.argv) > 1 else "config.json"
         run(config_path)

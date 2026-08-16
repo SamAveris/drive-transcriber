@@ -1,15 +1,17 @@
 """
-Video -> audio -> transcript via faster-whisper (local, GPU-accelerated).
+Video -> audio -> transcript.
 
-Extracts a compressed mono audio track from the video with ffmpeg, then
-transcribes it locally with faster-whisper. No API key or per-minute cost.
+Supports local faster-whisper (default) or OpenAI Whisper API (pilot).
+Audio is always extracted locally with ffmpeg before transcription.
 """
 
 import os
 import site
-import subprocess
 import sys
 from pathlib import Path
+
+from audio import extract_audio
+from transcript import Segment, TranscriptResult
 
 _model = None
 _model_config = None
@@ -29,11 +31,9 @@ def _register_cuda_dlls():
                 os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
 
 
-_register_cuda_dlls()
-
-
-def _get_model(model_size: str, device: str, compute_type: str):
+def _get_local_model(model_size: str, device: str, compute_type: str):
     global _model, _model_config
+    _register_cuda_dlls()
     config = (model_size, device, compute_type)
     if _model is None or _model_config != config:
         from faster_whisper import WhisperModel
@@ -43,27 +43,42 @@ def _get_model(model_size: str, device: str, compute_type: str):
     return _model
 
 
-def extract_audio(video_path: str, out_path: str):
-    """Extract audio as mono 16kHz mp3 at 64kbps -- small, speech-quality-sufficient."""
-    cmd = [
-        "ffmpeg", "-y", "-i", video_path,
-        "-vn", "-ac", "1", "-ar", "16000", "-b:a", "64k",
-        out_path,
+def _transcribe_local(
+    audio_path: str,
+    model: str,
+    device: str,
+    compute_type: str,
+) -> TranscriptResult:
+    whisper = _get_local_model(model, device, compute_type)
+    segments, _ = whisper.transcribe(audio_path)
+    segment_list = [
+        Segment(start=s.start, end=s.end, text=s.text.strip())
+        for s in segments
+        if s.text.strip()
     ]
-    subprocess.run(cmd, check=True, capture_output=True)
+    text = " ".join(s.text for s in segment_list)
+    return TranscriptResult(text=text, segments=segment_list)
 
 
-def transcribe_video(
-    video_path: str,
-    work_dir: str,
-    model: str = "medium",
-    device: str = "cuda",
-    compute_type: str = "float16",
-) -> str:
+def transcribe_video(video_path: str, work_dir: str, cfg: dict) -> TranscriptResult:
     os.makedirs(work_dir, exist_ok=True)
     audio_path = os.path.join(work_dir, "audio.mp3")
     extract_audio(video_path, audio_path)
 
-    whisper = _get_model(model, device, compute_type)
-    segments, _ = whisper.transcribe(audio_path)
-    return " ".join(segment.text.strip() for segment in segments)
+    backend = cfg.get("transcription_backend", "local")
+    if backend == "openai":
+        from transcribe_openai import transcribe_audio
+
+        return transcribe_audio(
+            audio_path,
+            work_dir=work_dir,
+            model=cfg.get("openai_model", "whisper-1"),
+            chunk_minutes=cfg.get("chunk_minutes", 20),
+        )
+
+    return _transcribe_local(
+        audio_path,
+        model=cfg["whisper_model"],
+        device=cfg["device"],
+        compute_type=cfg["compute_type"],
+    )
