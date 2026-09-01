@@ -5,6 +5,7 @@ import os
 from openai import OpenAI
 
 from audio import split_audio
+from formats.text import segments_to_readable_text
 from transcript import Segment, TranscriptResult
 
 # Stay under OpenAI's 25MB upload limit (~20MB safety margin).
@@ -35,7 +36,7 @@ def _transcribe_file(audio_path: str, model: str) -> TranscriptResult:
         for s in (result.segments or [])
         if s.text.strip()
     ]
-    text = result.text.strip() if result.text else " ".join(s.text for s in segments)
+    text = segments_to_readable_text(segments) if segments else (result.text or "").strip()
     return TranscriptResult(text=text, segments=segments)
 
 
@@ -53,11 +54,9 @@ def transcribe_audio(
     chunk_seconds = chunk_minutes * 60
 
     all_segments: list[Segment] = []
-    texts: list[str] = []
     for i, chunk_path in enumerate(chunk_paths):
         offset = i * chunk_seconds
         chunk_result = _transcribe_file(chunk_path, model)
-        texts.append(chunk_result.text)
         for seg in chunk_result.segments:
             all_segments.append(
                 Segment(
@@ -67,4 +66,7 @@ def transcribe_audio(
                 )
             )
 
-    return TranscriptResult(text="\n\n".join(texts), segments=all_segments)
+    return TranscriptResult(
+        text=segments_to_readable_text(all_segments),
+        segments=all_segments,
+    )

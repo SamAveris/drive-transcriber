@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from audio import extract_audio
+from formats.text import segments_to_readable_text
 from transcript import Segment, TranscriptResult
 
 _model = None
@@ -56,7 +57,7 @@ def _transcribe_local(
         for s in segments
         if s.text.strip()
     ]
-    text = " ".join(s.text for s in segment_list)
+    text = segments_to_readable_text(segment_list)
     return TranscriptResult(text=text, segments=segment_list)
 
 

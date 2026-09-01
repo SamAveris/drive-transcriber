@@ -1,11 +1,14 @@
 # Drive Video Transcriber
 
-Watches a Google Drive folder for new videos and automatically transcribes
-them using local faster-whisper, writing each transcript back to a
-`Transcripts` subfolder in Drive.
+Watches a Google Drive **Inbox** folder for new confessional videos, transcribes
+via **OpenAI Whisper API** (default), writes `.txt`/`.srt` to a `Transcripts`
+subfolder, and updates a **Google Sheets catalog** with share links and
+copy-paste WhatsApp messages.
 
-Designed to run unattended on a schedule (cron, Task Scheduler, or a cloud
-scheduler) -- see "Scheduling it" below.
+Designed to run on a schedule on your PC (Task Scheduler) — see below.
+
+**Phase 1 workflow setup:** see [PHASE1_SETUP.md](PHASE1_SETUP.md) (Form intake,
+catalog Sheet, folder layout on your dev Google account).
 
 ## How it decides what's "new"
 
@@ -18,7 +21,7 @@ custom Drive property (`transcript_status = done` or `failed`). This means:
 ## 1. Set up Google Drive access
 
 1. Create (or reuse) a project at https://console.cloud.google.com
-2. Enable the **Google Drive API** (APIs & Services > Enable APIs).
+2. Enable the **Google Drive API** and **Google Sheets API** (APIs & Services > Enable APIs).
 3. Configure the **OAuth consent screen** (APIs & Services > OAuth consent
    screen). External user type is fine for personal Gmail.
 4. Create an **OAuth client ID** (APIs & Services > Credentials > Create
@@ -31,6 +34,9 @@ custom Drive property (`transcript_status = done` or `failed`). This means:
    ```
    This saves `token.json` locally. Scheduled runs reuse it and refresh
    automatically -- you won't need to sign in again unless the token is revoked.
+
+   **After upgrading to Phase 1:** delete `token.json` and re-run `--auth` once
+   (Sheets scope was added).
 
 **Why OAuth?** Personal Google accounts (Gmail) do not allow service accounts
 to upload files -- Google returns "Service Accounts do not have storage quota."
@@ -151,6 +157,20 @@ Models: `whisper-1` (timestamps + SRT), `gpt-4o-mini-transcribe` (cheaper),
 (`chunk_minutes`, default 20) to stay under OpenAI's 25MB upload limit.
 
 Switch back to local GPU transcription with `"transcription_backend": "local"`.
+
+## Phase 1 catalog (Form + Sheet + WhatsApp links)
+
+When `catalog_sheet_id` is set in `config.json`, each processed video gets a row
+in the **Catalog** tab: contestant, duration, Drive links, and a pre-built
+`whatsapp_message`. Form responses on the linked Sheet tab are matched to inbox
+files by Drive file ID.
+
+```powershell
+python main.py --init-catalog   # write header row once
+python main.py                  # poll, transcribe, update catalog
+```
+
+Full setup: [PHASE1_SETUP.md](PHASE1_SETUP.md).
 
 ## Notes on local processing
 

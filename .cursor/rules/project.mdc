@@ -5,9 +5,10 @@ alwaysApply: true
 
 # drive-transcriber
 
-Python tool that watches a Google Drive folder for new videos and transcribes them locally with faster-whisper, writing `.txt` files to a `Transcripts` subfolder.
+Python tool that watches a Google Drive Inbox for new videos, extracts audio locally with ffmpeg, transcribes via OpenAI Whisper API by default, writes `.txt` + `.srt` to `Transcripts/`, and updates a Google Sheets catalog (Phase 1) with WhatsApp share messages.
 
-- Entry point: `main.py` (use `python main.py --auth` once for OAuth setup)
-- Config: `config.json` overrides defaults from `config.example.json`; folder IDs required
-- Secrets: `credentials.json`, `token.json` (gitignored, never commit)
-- Stack: Google Drive API via OAuth, ffmpeg, faster-whisper (CUDA on Windows via pip nvidia libs)
+- Entry point: `main.py` (`--auth`, `--init-catalog`, `--local-file`)
+- Phase 1 setup: `PHASE1_SETUP.md`
+- Config: `config.json` overrides `config.example.json`; folder + sheet IDs required for catalog
+- Secrets: `OPENAI_API_KEY`, `credentials.json`, `token.json` (gitignored)
+- Stack: Drive + Sheets API via OAuth, ffmpeg, OpenAI Whisper API; optional local faster-whisper

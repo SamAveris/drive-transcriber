@@ -10,17 +10,29 @@ property (appProperties). This means the script has no local state to lose.
 """
 
 import io
-import os
 from typing import Optional
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google.oauth2 import service_account
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 
-SCOPES = ["https://www.googleapis.com/auth/drive"]
+from google_auth import authorize_oauth, load_credentials
+
+__all__ = [
+    "authorize_oauth",
+    "PROP_KEY",
+    "STATUS_DONE",
+    "STATUS_FAILED",
+    "get_drive_service",
+    "list_unprocessed_videos",
+    "download_file",
+    "find_or_create_folder",
+    "upload_transcript",
+    "file_view_link",
+    "ensure_anyone_with_link_can_view",
+    "mark_status",
+    "clear_status",
+]
 
 PROP_KEY = "transcript_status"
 STATUS_DONE = "done"
@@ -32,39 +44,8 @@ _LIST_KWARGS = {"supportsAllDrives": True, "includeItemsFromAllDrives": True}
 
 
 def get_drive_service(cfg: dict):
-    auth = cfg.get("auth", "oauth")
-    if auth == "service_account":
-        creds = service_account.Credentials.from_service_account_file(
-            cfg["service_account_file"], scopes=SCOPES
-        )
-    else:
-        creds = _load_oauth_credentials(
-            cfg["credentials_file"], cfg["token_file"]
-        )
+    creds = load_credentials(cfg)
     return build("drive", "v3", credentials=creds, cache_discovery=False)
-
-
-def authorize_oauth(credentials_file: str, token_file: str):
-    """Run the browser OAuth flow and save token_file. Call once during setup."""
-    flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
-    creds = flow.run_local_server(port=0)
-    with open(token_file, "w") as f:
-        f.write(creds.to_json())
-
-
-def _load_oauth_credentials(credentials_file: str, token_file: str) -> Credentials:
-    creds = None
-    if os.path.exists(token_file):
-        creds = Credentials.from_authorized_user_file(token_file, SCOPES)
-    if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-        with open(token_file, "w") as f:
-            f.write(creds.to_json())
-    if creds and creds.valid:
-        return creds
-    raise RuntimeError(
-        f"No valid OAuth token in {token_file}. Run: python main.py --auth"
-    )
 
 
 def list_unprocessed_videos(service, folder_id: str, mime_prefixes, page_size: int):
@@ -81,7 +62,7 @@ def list_unprocessed_videos(service, folder_id: str, mime_prefixes, page_size: i
         resp = service.files().list(
             q=query,
             spaces="drive",
-            fields="nextPageToken, files(id, name, mimeType, size, appProperties)",
+            fields="nextPageToken, files(id, name, mimeType, size, createdTime, appProperties)",
             pageSize=page_size,
             pageToken=page_token,
             **_LIST_KWARGS,
@@ -126,13 +107,40 @@ def find_or_create_folder(service, name: str, parent_id: str) -> str:
     return created["id"]
 
 
-def upload_transcript(service, local_path: str, filename: str, parent_id: str) -> str:
-    metadata = {"name": filename, "parents": [parent_id]}
+def upload_transcript(
+    service,
+    local_path: str,
+    filename: str,
+    parent_id: str,
+    app_properties: Optional[dict] = None,
+) -> str:
+    metadata: dict = {"name": filename, "parents": [parent_id]}
+    if app_properties:
+        metadata["appProperties"] = {
+            k: str(v) for k, v in app_properties.items() if v is not None and str(v)
+        }
     media = MediaFileUpload(local_path, mimetype="text/plain", resumable=False)
     created = service.files().create(
         body=metadata, media_body=media, fields="id", **_DRIVE_KWARGS
     ).execute()
     return created["id"]
+
+
+def file_view_link(file_id: str) -> str:
+    return f"https://drive.google.com/file/d/{file_id}/view"
+
+
+def ensure_anyone_with_link_can_view(service, file_id: str):
+    """Allow WhatsApp viewers to open the link without signing in."""
+    try:
+        service.permissions().create(
+            fileId=file_id,
+            body={"type": "anyone", "role": "reader"},
+            **_DRIVE_KWARGS,
+        ).execute()
+    except HttpError as err:
+        if err.resp.status not in (400, 403, 409):
+            raise
 
 
 def mark_status(service, file_id: str, status: str, extra_props: Optional[dict] = None):
