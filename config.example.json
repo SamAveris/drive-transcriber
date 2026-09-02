@@ -23,5 +23,8 @@
   "form_timestamp_column": "Timestamp",
   "form_match_window_minutes": 120,
   "contestant_names": [],
-  "notification_emails": []
+  "notification_emails": [],
+  "analysis_enabled": true,
+  "prompts_file": "prompts.yaml",
+  "openai_analysis_model": "gpt-4o-mini"
 }

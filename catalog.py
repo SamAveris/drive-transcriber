@@ -18,6 +18,7 @@ CATALOG_HEADERS = [
     "video_link",
     "transcript_md_link",
     "transcript_srt_link",
+    "summary",
     "note",
     "whatsapp_message",
 ]
@@ -184,6 +185,27 @@ def upsert_catalog_row(
         ).execute()
 
 
+def find_catalog_row_by_confessional_id(
+    sheets_service,
+    sheet_id: str,
+    tab: str,
+    confessional_id: str,
+) -> dict[str, str] | None:
+    """Return catalog row dict keyed by lowercase header, or None."""
+    headers = sync_catalog_headers(sheets_service, sheet_id, tab)
+    values = _read_sheet(sheets_service, sheet_id, tab)
+    if not values:
+        return None
+    id_col = _header_map(headers).get("confessional_id")
+    if id_col is None:
+        return None
+    target = confessional_id.strip()
+    for row in values[1:]:
+        if id_col < len(row) and row[id_col].strip() == target:
+            return _row_to_dict(headers, row)
+    return None
+
+
 def catalog_row_for_file(
     file_info: dict,
     *,
@@ -192,6 +214,7 @@ def catalog_row_for_file(
     video_link: str = "",
     transcript_md_link: str = "",
     transcript_srt_link: str = "",
+    summary: str = "",
     contestant: str = "",
     note: str = "",
     submitted_at: str = "",
@@ -212,6 +235,7 @@ def catalog_row_for_file(
         "video_link": video_link,
         "transcript_md_link": transcript_md_link,
         "transcript_srt_link": transcript_srt_link,
+        "summary": summary,
         "note": note,
         "whatsapp_message": "",
     }

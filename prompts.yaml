@@ -1,0 +1,52 @@
+# Configurable AI analysis prompts (OpenAI Chat Completions).
+# Edit freely — changes apply to the next confessional processed.
+# Per-job "model" overrides openai_analysis_model when set.
+
+openai_analysis_model: gpt-4o-mini
+
+auto_jobs:
+  - id: summary
+    enabled: true
+    system: >-
+      You are a TV production assistant summarizing confessionals for a reality
+      show editing team. Reply with exactly one sentence — no bullet points,
+      no headings, no line breaks.
+    user: |
+      Write one sentence summarizing this confessional for producers.
+
+      Contestant: {contestant}
+      Submitted: {submitted_at}
+      Note from intake form: {note}
+      Confessional ID: {confessional_id}
+
+      Transcript with timestamps:
+      {transcript_timestamps}
+
+  - id: key_moments
+    enabled: true
+    system: >-
+      You are a TV production assistant identifying clip-worthy moments from
+      confessionals. Always include timestamps in [HH:MM:SS] format matching
+      the transcript.
+    user: |
+      List 5–10 production-relevant moments from this confessional.
+
+      For each moment provide:
+      - Timestamp in [HH:MM:SS] format
+      - One-line headline
+      - 1–2 sentence description of why it matters for the show
+
+      Contestant: {contestant}
+      Submitted: {submitted_at}
+      Note: {note}
+
+      Transcript with timestamps:
+      {transcript_timestamps}
+
+# Phase 2: cross-transcript jobs (not executed yet)
+# corpus_jobs:
+#   - id: timeline
+#     name: Event timeline
+#     user: |
+#       Build a chronological timeline across these confessionals.
+#       {corpus_summaries}

@@ -10,6 +10,7 @@ Usage:
     python main.py --local-file path/to/video.mp4
     python main.py --auth
     python main.py --init-catalog
+    python main.py --reanalyze --confessional-id <uuid>
 """
 
 import json
@@ -20,10 +21,17 @@ import tempfile
 import traceback
 
 from confessional import get_confessional_id
+from analysis.context import result_from_segments
+from analysis.runner import (
+    analysis_enabled,
+    catalog_fields_from_outputs,
+    run_auto_jobs,
+)
 from catalog import (
     build_whatsapp_message,
     catalog_enabled,
     catalog_row_for_file,
+    find_catalog_row_by_confessional_id,
     get_sheets_service,
     init_catalog_headers,
     sync_catalog_headers,
@@ -32,14 +40,21 @@ from catalog import (
 from drive_client import (
     STATUS_DONE,
     STATUS_FAILED,
+    analysis_already_done,
     authorize_oauth,
+    clear_analysis_status,
     download_file,
     ensure_anyone_with_link_can_view,
+    file_id_from_link,
     file_view_link,
     find_or_create_folder,
     get_drive_service,
+    get_file_metadata,
     list_unprocessed_videos,
+    mark_analysis_status,
     mark_status,
+    read_file_text,
+    update_file_content,
     upload_transcript,
 )
 from filenames import (
@@ -49,7 +64,7 @@ from filenames import (
     sanitize_filename,
 )
 from formats.md import build_markdown_transcript
-from formats.srt import segments_to_srt
+from formats.srt import parse_srt, segments_to_srt
 from intake import (
     guess_contestant_from_filename,
     load_form_responses,
@@ -82,6 +97,7 @@ def load_config(path: str) -> dict:
     with open(path) as f:
         cfg.update(json.load(f))
 
+    cfg["_config_path"] = os.path.abspath(path)
     return cfg
 
 
@@ -113,6 +129,8 @@ def write_transcript_files(
             video_link=meta.get("video_link", ""),
             confessional_id=meta.get("confessional_id", ""),
             note=meta.get("note", ""),
+            summary=meta.get("summary", ""),
+            key_moments=meta.get("key_moments", ""),
         )
         with open(md_path, "w", encoding="utf-8") as f:
             f.write(body)
@@ -181,6 +199,34 @@ def _write_catalog(
     upsert_catalog_row(sheets_service, cfg["catalog_sheet_id"], tab, row)
 
 
+def _run_analysis(
+    result,
+    meta: dict,
+    cfg: dict,
+    file_info: dict | None = None,
+    force: bool = False,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Run auto_jobs. Returns (job outputs, catalog fields)."""
+    if not analysis_enabled(cfg):
+        return {}, {}
+
+    info = file_info or {}
+    if not force and analysis_already_done(info):
+        print("[analysis] skipped (already done)")
+        return {}, {}
+
+    try:
+        outputs = run_auto_jobs(result, meta, cfg)
+        if not outputs:
+            return {}, {}
+        return outputs, catalog_fields_from_outputs(outputs)
+    except Exception as err:
+        name = info.get("name", "unknown")
+        print(f"[{name}] analysis failed: {err}")
+        traceback.print_exc()
+        return {}, {}
+
+
 def process_file(
     service,
     file_info: dict,
@@ -236,17 +282,29 @@ def process_file(
             submitted_at,
             file_info.get("createdTime", ""),
         )
+        analysis_meta = {
+            "contestant": contestant,
+            "display_datetime": display_datetime,
+            "video_link": video_link,
+            "confessional_id": confessional_id,
+            "note": note,
+            "submitted_at": submitted_at,
+        }
+        analysis_outputs, analysis_fields = _run_analysis(
+            result, analysis_meta, cfg, file_info=file_info
+        )
+        if analysis_outputs:
+            mark_analysis_status(service, file_id)
+
         outputs = write_transcript_files(
             result,
             work_dir,
             base_name,
             cfg,
             meta={
-                "contestant": contestant,
-                "display_datetime": display_datetime,
-                "video_link": video_link,
-                "confessional_id": confessional_id,
-                "note": note,
+                **analysis_meta,
+                "summary": analysis_outputs.get("summary", ""),
+                "key_moments": analysis_outputs.get("key_moments", ""),
             },
         )
         transcript_props = {
@@ -287,6 +345,7 @@ def process_file(
             video_link=video_link,
             transcript_md_link=md_link,
             transcript_srt_link=srt_link,
+            **analysis_fields,
         )
         print(f"[{name}] done.")
         if catalog_enabled(cfg) and video_link:
@@ -351,6 +410,109 @@ def run_local_file(video_path: str, config_path: str):
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
+def run_reanalyze(confessional_id: str, config_path: str):
+    """Re-run analysis auto_jobs for an existing confessional without re-transcribing."""
+    cfg = load_config(config_path)
+    if not analysis_enabled(cfg):
+        raise ValueError("Set analysis_enabled: true and ensure prompts.yaml exists.")
+    if not catalog_enabled(cfg):
+        raise ValueError("catalog_sheet_id required for --reanalyze.")
+
+    service = get_drive_service(cfg)
+    sheets_service = get_sheets_service(cfg)
+    tab = cfg.get("catalog_tab", "Catalog")
+
+    row = find_catalog_row_by_confessional_id(
+        sheets_service, cfg["catalog_sheet_id"], tab, confessional_id
+    )
+    if not row:
+        raise ValueError(f"No catalog row for confessional_id: {confessional_id}")
+
+    file_id = row.get("drive_file_id", "")
+    if not file_id:
+        raise ValueError("Catalog row missing drive_file_id")
+
+    file_info = get_file_metadata(service, file_id)
+    srt_id = file_id_from_link(row.get("transcript_srt_link", ""))
+    if not srt_id:
+        raise ValueError("Catalog row missing transcript_srt_link — re-transcribe first.")
+
+    print(f"Re-analyzing confessional {confessional_id} ({file_info.get('name', file_id)})...")
+    srt_content = read_file_text(service, srt_id)
+    segments = parse_srt(srt_content)
+    if not segments:
+        raise ValueError("Could not parse SRT transcript.")
+
+    result = result_from_segments(segments)
+    submitted_at = row.get("submitted_at", "")
+    display_datetime = format_display_datetime(
+        submitted_at,
+        file_info.get("createdTime", ""),
+    )
+    meta = {
+        "contestant": row.get("contestant", ""),
+        "note": row.get("note", ""),
+        "submitted_at": row.get("submitted_at", ""),
+        "confessional_id": confessional_id,
+        "video_link": row.get("video_link", ""),
+        "display_datetime": display_datetime,
+    }
+    base_name = build_transcript_basename(
+        meta["contestant"],
+        meta["submitted_at"],
+        fallback_created=file_info.get("createdTime", ""),
+        fallback_video_name=file_info.get("name", ""),
+    )
+
+    md_id = file_id_from_link(row.get("transcript_md_link", ""))
+    if not md_id:
+        raise ValueError("Catalog row missing transcript_md_link — re-transcribe first.")
+
+    clear_analysis_status(service, file_id)
+
+    work_dir = tempfile.mkdtemp(prefix="drive_transcriber_reanalyze_")
+    try:
+        analysis_outputs, analysis_fields = _run_analysis(
+            result, meta, cfg, file_info=file_info, force=True
+        )
+        if analysis_outputs:
+            mark_analysis_status(service, file_id)
+
+        md_outputs = write_transcript_files(
+            result,
+            work_dir,
+            base_name,
+            cfg,
+            meta={
+                **meta,
+                "summary": analysis_outputs.get("summary", ""),
+                "key_moments": analysis_outputs.get("key_moments", ""),
+            },
+        )
+        if "md" not in md_outputs:
+            raise ValueError("Markdown output disabled in config.")
+        update_file_content(service, md_id, md_outputs["md"])
+        print(f"Updated transcript markdown on Drive.")
+
+        _write_catalog(
+            sheets_service,
+            cfg,
+            file_info,
+            status=row.get("status", "ready") or "ready",
+            confessional_id=confessional_id,
+            contestant=meta["contestant"],
+            note=meta["note"],
+            submitted_at=meta["submitted_at"],
+            video_link=row.get("video_link", ""),
+            transcript_md_link=row.get("transcript_md_link", ""),
+            transcript_srt_link=row.get("transcript_srt_link", ""),
+            **analysis_fields,
+        )
+        print("Re-analysis complete.")
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
 def run_init_catalog(config_path: str):
     cfg = load_config(config_path)
     if not catalog_enabled(cfg):
@@ -405,6 +567,22 @@ if __name__ == "__main__":
     elif len(sys.argv) >= 2 and sys.argv[1] == "--init-catalog":
         config_path = sys.argv[2] if len(sys.argv) > 2 else "config.json"
         run_init_catalog(config_path)
+    elif len(sys.argv) >= 2 and sys.argv[1] == "--reanalyze":
+        confessional_id = ""
+        config_path = "config.json"
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] == "--confessional-id" and i + 1 < len(args):
+                confessional_id = args[i + 1]
+                i += 2
+            else:
+                config_path = args[i]
+                i += 1
+        if not confessional_id:
+            print("Usage: python main.py --reanalyze --confessional-id <uuid> [config.json]")
+            sys.exit(1)
+        run_reanalyze(confessional_id, config_path)
     elif len(sys.argv) >= 3 and sys.argv[1] == "--local-file":
         video_path = sys.argv[2]
         config_path = sys.argv[3] if len(sys.argv) > 3 else "config.json"

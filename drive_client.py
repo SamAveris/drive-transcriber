@@ -10,6 +10,7 @@ property (appProperties). This means the script has no local state to lose.
 """
 
 import io
+import re
 from typing import Optional
 
 from googleapiclient.discovery import build
@@ -28,13 +29,24 @@ __all__ = [
     "download_file",
     "find_or_create_folder",
     "upload_transcript",
+    "update_file_content",
     "file_view_link",
     "ensure_anyone_with_link_can_view",
     "mark_status",
     "clear_status",
+    "ANALYSIS_PROP_KEY",
+    "ANALYSIS_STATUS_DONE",
+    "get_file_metadata",
+    "file_id_from_link",
+    "read_file_text",
+    "mark_analysis_status",
+    "clear_analysis_status",
+    "analysis_already_done",
 ]
 
 PROP_KEY = "transcript_status"
+ANALYSIS_PROP_KEY = "analysis_status"
+ANALYSIS_STATUS_DONE = "done"
 STATUS_DONE = "done"
 STATUS_FAILED = "failed"
 
@@ -126,6 +138,14 @@ def upload_transcript(
     return created["id"]
 
 
+def update_file_content(service, file_id: str, local_path: str):
+    """Replace an existing Drive file's content."""
+    media = MediaFileUpload(local_path, mimetype="text/plain", resumable=False)
+    service.files().update(
+        fileId=file_id, media_body=media, **_DRIVE_KWARGS
+    ).execute()
+
+
 def file_view_link(file_id: str) -> str:
     return f"https://drive.google.com/file/d/{file_id}/view"
 
@@ -157,5 +177,55 @@ def clear_status(service, file_id: str):
     service.files().update(
         fileId=file_id,
         body={"appProperties": {PROP_KEY: None}},
+        **_DRIVE_KWARGS,
+    ).execute()
+
+
+def get_file_metadata(service, file_id: str) -> dict:
+    return (
+        service.files()
+        .get(
+            fileId=file_id,
+            fields="id, name, mimeType, size, createdTime, appProperties",
+            **_DRIVE_KWARGS,
+        )
+        .execute()
+    )
+
+
+def file_id_from_link(link: str) -> str:
+    if not link:
+        return ""
+    match = re.search(r"/file/d/([^/]+)", link)
+    return match.group(1) if match else ""
+
+
+def read_file_text(service, file_id: str) -> str:
+    request = service.files().get_media(fileId=file_id, **_DRIVE_KWARGS)
+    buffer = io.BytesIO()
+    downloader = MediaIoBaseDownload(buffer, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    return buffer.getvalue().decode("utf-8", errors="replace")
+
+
+def analysis_already_done(file_info: dict) -> bool:
+    props = file_info.get("appProperties") or {}
+    return props.get(ANALYSIS_PROP_KEY) == ANALYSIS_STATUS_DONE
+
+
+def mark_analysis_status(service, file_id: str, status: str = ANALYSIS_STATUS_DONE):
+    service.files().update(
+        fileId=file_id,
+        body={"appProperties": {ANALYSIS_PROP_KEY: status}},
+        **_DRIVE_KWARGS,
+    ).execute()
+
+
+def clear_analysis_status(service, file_id: str):
+    service.files().update(
+        fileId=file_id,
+        body={"appProperties": {ANALYSIS_PROP_KEY: None}},
         **_DRIVE_KWARGS,
     ).execute()

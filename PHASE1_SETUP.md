@@ -110,7 +110,7 @@ python main.py
 
 ## 7. Schedule on your PC
 
-Windows Task Scheduler → run `python main.py` every 15 minutes in this folder.
+Windows Task Scheduler → run `python main.py` every 5 minutes in this folder.
 Ensure `OPENAI_API_KEY` is set for the task environment.
 
 ## 8. Email notifications (optional)
@@ -131,6 +131,30 @@ When a confessional finishes processing, send the WhatsApp copy-paste line to a 
 
 Email body includes the ready-to-paste WhatsApp message, plus optional note and transcript link.
 
+## 9. AI analysis (auto summaries)
+
+After each confessional is transcribed, optional OpenAI analysis runs automatically:
+a **one-sentence summary** (stored in the catalog `summary` column) and **key moments
+with timestamps** (embedded at the top of the transcript `.md` file on Drive).
+
+1. Ensure `OPENAI_API_KEY` is set (same key as Whisper).
+2. In `config.json`:
+   ```json
+   "analysis_enabled": true,
+   "prompts_file": "prompts.yaml",
+   "openai_analysis_model": "gpt-4o-mini"
+   ```
+3. Edit [`prompts.yaml`](prompts.yaml) to tune prompts — changes apply to the next confessional.
+4. Run `python main.py --init-catalog` once to add the catalog `summary` column.
+
+Re-run analysis without re-transcribing (updates the existing `.md` on Drive):
+
+```powershell
+python main.py --reanalyze --confessional-id <uuid-from-catalog>
+```
+
+Analysis failures are logged but do not fail transcription.
+
 ## Troubleshooting
 
 | Problem | Fix |
@@ -141,6 +165,8 @@ Email body includes the ready-to-paste WhatsApp message, plus optional note and 
 | WhatsApp link asks for login | Script sets link sharing; re-run or share file manually once |
 | Form file not matched | Form response URL must contain Drive file ID; widen `form_match_window_minutes` |
 | Email notification failed | Enable Gmail API; delete `token.json` and re-run `--auth`; check `notification_emails` |
+| Analysis skipped / empty | Set `analysis_enabled: true`; check `prompts.yaml` exists; verify `OPENAI_API_KEY` |
+| Re-analyze fails | Catalog row needs `transcript_srt_link`; use confessional_id from Catalog tab |
 
 ## Moving to production later
 
