@@ -28,5 +28,6 @@
   "production_notification_emails": [],
   "analysis_enabled": true,
   "prompts_file": "prompts.yaml",
-  "openai_analysis_model": "gpt-4o-mini"
+  "openai_analysis_model": "gpt-4o-mini",
+  "producer_config_file": "producer.yaml"
 }

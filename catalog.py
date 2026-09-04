@@ -216,6 +216,27 @@ def find_catalog_row_by_confessional_id(
     return None
 
 
+def list_catalog_rows(
+    sheets_service,
+    sheet_id: str,
+    tab: str,
+    *,
+    status: str | None = "ready",
+) -> list[dict[str, str]]:
+    """Return catalog rows as dicts keyed by lowercase header."""
+    headers = sync_catalog_headers(sheets_service, sheet_id, tab)
+    values = _read_sheet(sheets_service, sheet_id, tab)
+    if not values:
+        return []
+    rows: list[dict[str, str]] = []
+    for row in values[1:]:
+        data = _row_to_dict(headers, row)
+        if status and data.get("status") != status:
+            continue
+        rows.append(data)
+    return rows
+
+
 def catalog_row_for_file(
     file_info: dict,
     *,

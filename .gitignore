@@ -3,5 +3,7 @@ credentials.json
 token.json
 config.json
 pilot_output/
+conversations/
+daily_summaries_drive.json
 *.log
 __pycache__/

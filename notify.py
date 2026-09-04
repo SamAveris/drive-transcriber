@@ -108,3 +108,41 @@ def send_confessional_notification(
         userId="me",
         body={"raw": raw},
     ).execute()
+
+
+def send_daily_summary_notification(
+    cfg: dict,
+    *,
+    date_str: str,
+    summary: str,
+    log_link: str = "",
+):
+    """Email daily summary to the main producer list (notification_emails)."""
+    recipients = list(cfg.get("notification_emails") or [])
+    if not recipients:
+        return
+
+    subject = f"Daily confessional summary — {date_str}"
+    plain_lines = [summary.strip(), ""]
+    if log_link:
+        plain_lines.extend([f"Full log: {log_link}", ""])
+    plain_body = "\n".join(plain_lines).strip() + "\n"
+
+    html_parts = [f"<pre style='white-space:pre-wrap;font-family:inherit'>{html.escape(summary.strip())}</pre>"]
+    if log_link:
+        html_parts.append(
+            f'<p><a href="{html.escape(log_link)}">View full daily log on Drive</a></p>'
+        )
+    html_body = "\n".join(html_parts)
+
+    message = MIMEMultipart("alternative", policy=_EMAIL_POLICY)
+    message.attach(MIMEText(plain_body, "plain", "utf-8"))
+    message.attach(MIMEText(html_body, "html", "utf-8"))
+    message["to"] = ", ".join(recipients)
+    message["subject"] = subject
+
+    raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+    _gmail_service(cfg).users().messages().send(
+        userId="me",
+        body={"raw": raw},
+    ).execute()

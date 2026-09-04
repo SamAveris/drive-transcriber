@@ -1,0 +1,12 @@
+{
+  "tagOwners": {
+    "tag:transcriber": ["autogroup:admin"]
+  },
+  "acls": [
+    {
+      "action": "accept",
+      "src": ["autogroup:member"],
+      "dst": ["tag:transcriber:443"]
+    }
+  ]
+}

@@ -8,8 +8,9 @@ alwaysApply: true
 Python tool that watches a Google Drive Inbox for new videos, extracts audio locally with ffmpeg, transcribes via OpenAI Whisper API by default, writes `.md` + `.srt` to `Transcripts/`, runs optional AI analysis (`prompts.yaml`), and updates a Google Sheets catalog with WhatsApp share messages.
 
 - Entry point: `main.py` (`--auth`, `--init-catalog`, `--local-file`, `--reanalyze`)
+- Producer chat: `producer_app.py` (Streamlit + Tailscale); daily job: `producer_daily.py`
 - Phase 1 setup: `PHASE1_SETUP.md`
-- Analysis prompts: `prompts.yaml`
+- Analysis prompts: `prompts.yaml`; producer persona: `producer.yaml`
 - Config: `config.json` overrides `config.example.json`; folder + sheet IDs required for catalog
 - Secrets: `OPENAI_API_KEY`, `credentials.json`, `token.json` (gitignored)
 - Stack: Drive + Sheets API via OAuth, ffmpeg, OpenAI Whisper API; optional local faster-whisper

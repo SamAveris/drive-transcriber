@@ -158,6 +158,132 @@ python main.py --reanalyze --confessional-id <uuid-from-catalog>
 
 Analysis failures are logged but do not fail transcription.
 
+## Producer chat (Phase 2, Tailscale)
+
+Interactive LLM chat for producers over **Streamlit**, reachable remotely via **Tailscale** with chat-only access (tailnet members cannot reach RDP, SMB, or other ports on this PC).
+
+### Install
+
+```powershell
+pip install -r requirements.txt
+```
+
+Ensure `producer.yaml` exists (committed template) and `config.json` includes:
+
+```json
+"producer_config_file": "producer.yaml"
+```
+
+Access is gated by **Tailscale** only (ACL + Serve). No app password.
+
+### Tailscale setup (chat-only access)
+
+1. Install [Tailscale](https://tailscale.com/download) on the transcriber PC and sign in.
+2. Require **2FA** for all tailnet users (Tailscale admin → Settings).
+3. Invite each producer individually — do not share one Tailscale login.
+4. Tag the transcriber PC in [Machines](https://login.tailscale.com/admin/machines):
+   - Edit the machine → add tag **`tag:transcriber`**
+5. Apply the ACL in **Access controls** (copy from [`tailscale/producer_acl.json`](tailscale/producer_acl.json)):
+
+```json
+{
+  "tagOwners": {
+    "tag:transcriber": ["autogroup:admin"]
+  },
+  "acls": [
+    {
+      "action": "accept",
+      "src": ["autogroup:member"],
+      "dst": ["tag:transcriber:443"]
+    }
+  ]
+}
+```
+
+This allows tailnet members to reach **only** HTTPS on the tagged machine (Tailscale Serve → producer chat). No other ports or devices are reachable.
+
+Leave **subnet routing**, **exit nodes**, and **Tailscale Funnel** disabled.
+
+**Enable Tailscale Serve** on your tailnet (required for HTTPS access). Run `tailscale serve status` on the transcriber PC — if Serve is not enabled, open the admin link it prints and turn it on for this machine.
+
+### Firewall (run once on transcriber PC)
+
+From PowerShell **as Administrator**:
+
+```powershell
+.\register_producer_firewall.ps1
+```
+
+This blocks direct access to Streamlit on port 8501 from Tailscale and blocks RDP/SMB from the tailnet. It does **not** change normal internet or home LAN use.
+
+### Run the app
+
+```powershell
+.\run_producer_app.bat
+```
+
+This starts Streamlit on `127.0.0.1:8501` and exposes it via **Tailscale Serve** at `https://<machine-name>`.
+
+Producers open **`https://<machine-name>`** (MagicDNS — run `tailscale status` on the PC to see the name).
+
+To stop:
+
+```powershell
+.\stop_producer_app.bat
+```
+
+### Start at boot (optional)
+
+Register a Windows Task Scheduler job (runs 1 minute after you log in, so Tailscale is up):
+
+```powershell
+.\register_producer_startup_task.ps1
+```
+
+Log: `producer_app.log`. Test manually: `schtasks /Run /TN "Producer Chat"`
+
+**Do not use** Streamlit’s public “External URL” — firewall rules should block it.
+
+Local development on the PC: `http://localhost:8501`
+
+### Normal networking
+
+These changes do **not** affect web browsing, the scheduled transcriber, Drive/Sheets API calls, or home Wi‑Fi/LAN. They only restrict what tailnet users can reach on this machine.
+
+**Chat tab** — pick scope (one confessional, all compact, or all full), then ask questions.
+
+**Settings tab** — edit producer persona / model; saves to `producer.yaml`.
+
+**History tab** — read saved conversations from the local `conversations/` folder.
+
+### Verify access (from a producer device on tailnet)
+
+| Test | Expected |
+|------|----------|
+| `https://<machine-name>` | Chat loads |
+| `http://<machine-name>:8501` | Blocked / timeout |
+| RDP to transcriber Tailscale IP | Blocked |
+
+Check Serve is running: `tailscale serve status`
+
+### Daily summary
+
+Morning job appends to `Transcripts/Analysis/daily_summaries.md` on Drive and emails `notification_emails`.
+
+Edit prompt in `producer.yaml` → `daily_summary` section.
+
+```powershell
+python producer_daily.py
+```
+
+Schedule daily (8:00 AM default):
+
+```powershell
+.\register_daily_summary_task.ps1
+```
+
+PC must be on at the scheduled time.
+
 ## Troubleshooting
 
 | Problem | Fix |
@@ -170,6 +296,9 @@ Analysis failures are logged but do not fail transcription.
 | Email notification failed | Enable Gmail API; delete `token.json` and re-run `--auth`; check `notification_emails` |
 | Analysis skipped / empty | Set `analysis_enabled: true`; check `prompts.yaml` exists; verify `OPENAI_API_KEY` |
 | Re-analyze fails | Catalog row needs `transcript_srt_link`; use confessional_id from Catalog tab |
+| Producer chat unreachable | PC awake; Tailscale connected; run `run_producer_app.bat`; check `tailscale serve status` |
+| Producer chat ACL denied | Machine tagged `tag:transcriber`; ACL allows `:443`; user invited to tailnet |
+| Daily summary not emailed | Check `notification_emails`; Gmail API authorized; run `python producer_daily.py` manually |
 
 ## Moving to production later
 

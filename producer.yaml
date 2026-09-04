@@ -1,0 +1,16 @@
+# Producer chat UI + daily summary settings (editable in producer_app Settings tab).
+
+openai_model: gpt-4o-mini
+
+persona:
+  system: |
+    You are a production assistant for 32 Fans Real Survivor Fantasy Football.
+    Tone: direct, editorial, no fluff. Cite timestamps [HH:MM:SS] when referencing confessionals.
+
+daily_summary:
+  enabled: true
+  prompt: |
+    Summarize all confessionals from the last 24 hours for the production team.
+    Highlight storylines, conflicts, and clip-worthy moments. Use bullet points.
+  log_file: daily_summaries.md
+  email_on_empty: false

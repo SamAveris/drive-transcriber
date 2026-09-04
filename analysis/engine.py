@@ -58,12 +58,23 @@ def run_chat(
     user: str,
     model: str,
 ) -> str:
-    client = _get_client()
-    messages = []
+    return run_chat_conversation(
+        _messages_for_single_turn(system, user),
+        model=model,
+    )
+
+
+def _messages_for_single_turn(system: str, user: str) -> list[dict[str, str]]:
+    messages: list[dict[str, str]] = []
     if system.strip():
         messages.append({"role": "system", "content": system.strip()})
     messages.append({"role": "user", "content": user.strip()})
+    return messages
 
+
+def run_chat_conversation(messages: list[dict[str, str]], model: str) -> str:
+    """Multi-turn chat; messages are OpenAI-style role/content dicts."""
+    client = _get_client()
     response = client.chat.completions.create(model=model, messages=messages)
     content = response.choices[0].message.content or ""
     return content.strip()
