@@ -125,11 +125,14 @@ When a confessional finishes processing, send the WhatsApp copy-paste line to a 
    ```
 3. In `config.json`:
    ```json
-   "notification_emails": ["producer1@gmail.com", "producer2@gmail.com"]
+   "notification_emails": ["producer1@gmail.com", "producer2@gmail.com"],
+   "production_contestant_names": ["Production"],
+   "production_notification_emails": ["sam.averis@gmail.com", "asinensky@gmail.com"]
    ```
+   Confessionals whose **Name** is `Production` (or any name in `production_contestant_names`) use the production list; all others use `notification_emails`.
 4. Emails are sent **from the same Google account** you used for `--auth`.
 
-Email body includes the ready-to-paste WhatsApp message, plus optional note and transcript link.
+Email body includes the ready-to-paste WhatsApp line (with one-sentence summary when analysis is enabled), plus optional note and transcript link.
 
 ## 9. AI analysis (auto summaries)
 

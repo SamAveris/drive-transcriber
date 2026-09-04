@@ -71,7 +71,7 @@ from intake import (
     match_file_to_form,
 )
 from media_info import get_media_duration_seconds
-from notify import notifications_enabled, send_confessional_notification
+from notify import notification_recipients, notifications_enabled, send_confessional_notification
 from transcribe import transcribe_video
 
 
@@ -349,7 +349,12 @@ def process_file(
         )
         print(f"[{name}] done.")
         if catalog_enabled(cfg) and video_link:
-            msg = build_whatsapp_message(contestant, submitted_at, video_link)
+            msg = build_whatsapp_message(
+                contestant,
+                submitted_at,
+                video_link,
+                analysis_fields.get("summary", ""),
+            )
             print(f"[{name}] whatsapp: {msg}")
             if notifications_enabled(cfg):
                 try:
@@ -361,7 +366,7 @@ def process_file(
                         transcript_md_link=md_link,
                         confessional_id=confessional_id,
                     )
-                    print(f"[{name}] emailed {len(cfg.get('notification_emails', []))} recipient(s)")
+                    print(f"[{name}] emailed {len(notification_recipients(cfg, contestant))} recipient(s)")
                 except Exception as err:
                     print(f"[{name}] email notification failed: {err}")
 

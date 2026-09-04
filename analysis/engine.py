@@ -70,10 +70,7 @@ def run_chat(
 
 
 def one_sentence_summary(text: str) -> str:
-    """Normalize model output to a single sentence for the catalog."""
+    """Normalize model output to a single line (no truncation)."""
     text = re.sub(r"\s+", " ", text).strip()
     text = re.sub(r"^#+\s*", "", text).strip()
-    if not text:
-        return ""
-    parts = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)
-    return parts[0].strip()
+    return text

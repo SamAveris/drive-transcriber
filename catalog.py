@@ -1,5 +1,6 @@
 """Google Sheets production catalog for confessionals."""
 
+import re
 from typing import Any
 
 from googleapiclient.discovery import build
@@ -131,14 +132,23 @@ def _build_row_values(headers: list[str], data: dict[str, Any]) -> list[str]:
     return row
 
 
-def build_whatsapp_message(contestant: str, submitted_at: str, video_link: str) -> str:
+def build_whatsapp_message(
+    contestant: str,
+    submitted_at: str,
+    video_link: str,
+    summary: str = "",
+) -> str:
     name = contestant or "Unknown"
     date_part = ""
     if submitted_at:
         date_part = submitted_at.strip()[:10]
+    prefix = f"New confessional from {name}"
     if date_part:
-        return f"New confessional from {name} ({date_part}): {video_link}"
-    return f"New confessional from {name}: {video_link}"
+        prefix += f" ({date_part})"
+    if summary.strip():
+        clean = re.sub(r"\s+", " ", summary).strip()
+        return f"{prefix}: {clean} {video_link}"
+    return f"{prefix}: {video_link}"
 
 
 def upsert_catalog_row(
@@ -241,6 +251,6 @@ def catalog_row_for_file(
     }
     if video_link:
         row["whatsapp_message"] = build_whatsapp_message(
-            contestant, submitted, video_link
+            contestant, submitted, video_link, summary
         )
     return row

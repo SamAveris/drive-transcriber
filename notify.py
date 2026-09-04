@@ -1,21 +1,48 @@
 """Email notifications when a confessional is ready (Gmail API via OAuth)."""
 
 import base64
+import html
+import re
+from email import policy
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from googleapiclient.discovery import build
 
 from google_auth import load_credentials
 
+_EMAIL_POLICY = policy.default.clone(max_line_length=0)
+
 
 def notifications_enabled(cfg: dict) -> bool:
-    emails = cfg.get("notification_emails") or []
-    return bool(emails)
+    regular = cfg.get("notification_emails") or []
+    production = cfg.get("production_notification_emails") or []
+    return bool(regular or production)
+
+
+def _is_production_contestant(contestant: str, cfg: dict) -> bool:
+    names = cfg.get("production_contestant_names") or ["Production"]
+    name = (contestant or "").strip().lower()
+    return name in {n.strip().lower() for n in names if n.strip()}
+
+
+def notification_recipients(cfg: dict, contestant: str) -> list[str]:
+    """Pick email list based on contestant (e.g. Production vs players)."""
+    if _is_production_contestant(contestant, cfg):
+        emails = cfg.get("production_notification_emails") or []
+        if emails:
+            return list(emails)
+    return list(cfg.get("notification_emails") or [])
 
 
 def _gmail_service(cfg: dict):
     creds = load_credentials(cfg)
     return build("gmail", "v1", credentials=creds, cache_discovery=False)
+
+
+def _normalize_copy_line(text: str) -> str:
+    """Single-line copy text — no internal line breaks."""
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def send_confessional_notification(
@@ -27,29 +54,52 @@ def send_confessional_notification(
     transcript_md_link: str = "",
     confessional_id: str = "",
 ):
-    recipients = cfg.get("notification_emails") or []
+    recipients = notification_recipients(cfg, contestant)
     if not recipients or not whatsapp_message:
         return
 
     name = contestant or "Unknown"
     subject = f"New confessional from {name}"
+    copy_line = _normalize_copy_line(whatsapp_message)
 
-    lines = [
+    plain_lines = [
         "Copy the line below into WhatsApp:",
         "",
-        whatsapp_message,
+        copy_line,
         "",
     ]
     if note.strip():
-        lines.extend([f"Note: {note.strip()}", ""])
+        plain_lines.extend([f"Note: {note.strip()}", ""])
     if transcript_md_link:
-        lines.extend([f"Transcript: {transcript_md_link}", ""])
+        plain_lines.extend([f"Transcript: {transcript_md_link}", ""])
     if confessional_id:
-        lines.extend([f"Confessional ID: {confessional_id}", ""])
+        plain_lines.extend([f"Confessional ID: {confessional_id}", ""])
+    plain_body = "\n".join(plain_lines).strip() + "\n"
 
-    body = "\n".join(lines).strip() + "\n"
+    escaped = html.escape(copy_line)
+    html_parts = [
+        "<p>Copy the line below into WhatsApp:</p>",
+        (
+            '<div style="background:#f4f4f4;padding:12px;font-family:monospace;'
+            f'font-size:13px;white-space:nowrap;overflow-x:auto;">{escaped}</div>'
+        ),
+    ]
+    if note.strip():
+        html_parts.append(f"<p><strong>Note:</strong> {html.escape(note.strip())}</p>")
+    if transcript_md_link:
+        html_parts.append(
+            f'<p><strong>Transcript:</strong> '
+            f'<a href="{html.escape(transcript_md_link)}">{html.escape(transcript_md_link)}</a></p>'
+        )
+    if confessional_id:
+        html_parts.append(
+            f"<p><strong>Confessional ID:</strong> {html.escape(confessional_id)}</p>"
+        )
+    html_body = "\n".join(html_parts)
 
-    message = MIMEText(body)
+    message = MIMEMultipart("alternative", policy=_EMAIL_POLICY)
+    message.attach(MIMEText(plain_body, "plain", "utf-8"))
+    message.attach(MIMEText(html_body, "html", "utf-8"))
     message["to"] = ", ".join(recipients)
     message["subject"] = subject
 

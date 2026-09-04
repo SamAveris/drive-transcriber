@@ -24,6 +24,8 @@
   "form_match_window_minutes": 120,
   "contestant_names": [],
   "notification_emails": [],
+  "production_contestant_names": ["Production"],
+  "production_notification_emails": [],
   "analysis_enabled": true,
   "prompts_file": "prompts.yaml",
   "openai_analysis_model": "gpt-4o-mini"
