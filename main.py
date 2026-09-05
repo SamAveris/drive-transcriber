@@ -65,6 +65,7 @@ from filenames import (
 )
 from formats.md import build_markdown_transcript
 from formats.srt import parse_srt, segments_to_srt
+from formats.timestamped import segments_to_timestamped_text
 from intake import (
     guess_contestant_from_filename,
     load_form_responses,
@@ -123,7 +124,7 @@ def write_transcript_files(
     if "md" in output_formats:
         md_path = os.path.join(dest_dir, f"{base_name}.md")
         body = build_markdown_transcript(
-            result.text,
+            segments_to_timestamped_text(result.segments),
             contestant=meta.get("contestant", ""),
             display_datetime=meta.get("display_datetime", ""),
             video_link=meta.get("video_link", ""),

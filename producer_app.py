@@ -12,6 +12,51 @@ _REPO = os.path.dirname(os.path.abspath(__file__))
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
+
+def _local_code_digest() -> str:
+    """Fingerprint mtimes of project modules Streamlit may cache across reruns."""
+    import hashlib
+
+    parts: list[str] = []
+    analysis_dir = os.path.join(_REPO, "analysis")
+    if os.path.isdir(analysis_dir):
+        for name in sorted(os.listdir(analysis_dir)):
+            if name.endswith(".py"):
+                path = os.path.join(analysis_dir, name)
+                parts.append(f"{path}:{os.path.getmtime(path):.6f}")
+    for rel in ("drive_client.py", "main.py", "producer_app.py"):
+        path = os.path.join(_REPO, rel)
+        if os.path.isfile(path):
+            parts.append(f"{path}:{os.path.getmtime(path):.6f}")
+    formats_dir = os.path.join(_REPO, "formats")
+    if os.path.isdir(formats_dir):
+        for name in sorted(os.listdir(formats_dir)):
+            if name.endswith(".py"):
+                path = os.path.join(formats_dir, name)
+                parts.append(f"{path}:{os.path.getmtime(path):.6f}")
+    return hashlib.md5("|".join(parts).encode()).hexdigest()
+
+
+def _sync_local_modules() -> bool:
+    """Drop cached project modules when tracked .py files change."""
+    digest = _local_code_digest()
+    prev = os.environ.get("PRODUCER_CODE_DIGEST")
+    if prev == digest:
+        return False
+    for name in list(sys.modules):
+        if name.startswith(("analysis.", "formats.")) or name in (
+            "analysis",
+            "formats",
+            "drive_client",
+            "main",
+        ):
+            del sys.modules[name]
+    os.environ["PRODUCER_CODE_DIGEST"] = digest
+    return True
+
+
+_sync_local_modules()
+
 from analysis.conversation_log import (  # noqa: E402
     list_conversations,
     log_turn,
@@ -26,7 +71,12 @@ from analysis.corpus import (  # noqa: E402
     format_first_user_message,
     load_catalog_rows,
 )
-from analysis.engine import run_chat_conversation  # noqa: E402
+from analysis.engine import (  # noqa: E402
+    get_auto_job,
+    load_prompts,
+    run_chat_conversation,
+    save_prompts,
+)
 from analysis.producer_config import (  # noqa: E402
     load_producer_config,
     persona_system,
@@ -39,7 +89,22 @@ from drive_client import (  # noqa: E402
     get_drive_service,
     read_file_text,
 )
+from formats.browse_view import (  # noqa: E402
+    align_moments_with_lines,
+    is_timestamped_body,
+    parse_key_moments,
+    parse_timestamped_body,
+    parse_transcript_md,
+)
 from main import load_config  # noqa: E402
+
+
+APP_TITLE = "32FRSFFL Producer Console"
+
+PROMPT_TEMPLATE_VARS = (
+    "{contestant}, {submitted_at}, {note}, {confessional_id}, "
+    "{transcript_timestamps}, {transcript_text}, {video_link}"
+)
 
 
 def _load_cfg():
@@ -167,22 +232,100 @@ def _chat_tab(cfg: dict, producer: dict):
     )
 
 
-def _settings_tab(cfg: dict, producer: dict):
-    st.subheader("Producer persona")
-    st.caption("Changes apply to new conversations and daily summaries.")
+def _pipeline_job_editor(job_id: str, label: str, job: dict | None) -> dict | None:
+    """Render system/user/enabled fields; return updated job dict or None if missing."""
+    if job is None:
+        st.warning(f"No `{job_id}` job found in prompts.yaml auto_jobs.")
+        return None
+    enabled = st.checkbox(f"Enable {label}", value=bool(job.get("enabled", True)), key=f"job_{job_id}_enabled")
     system = st.text_area(
         "System prompt",
-        value=persona_system(cfg, producer),
-        height=240,
+        value=str(job.get("system") or ""),
+        height=120,
+        key=f"job_{job_id}_system",
     )
-    model = st.text_input("OpenAI model", value=producer_model(cfg, producer))
-    if st.button("Save settings"):
-        data = load_producer_config(cfg)
-        data.setdefault("persona", {})["system"] = system.strip()
-        if model.strip():
-            data["openai_model"] = model.strip()
-        save_producer_config(cfg, data)
-        st.success("Saved to producer.yaml")
+    user = st.text_area(
+        "User prompt template",
+        value=str(job.get("user") or ""),
+        height=220,
+        key=f"job_{job_id}_user",
+    )
+    return {
+        **job,
+        "id": job_id,
+        "enabled": enabled,
+        "system": system,
+        "user": user,
+    }
+
+
+def _settings_tab(cfg: dict, producer: dict):
+    st.caption("Saving rewrites YAML files; inline comments in those files are not preserved.")
+
+    with st.expander("Chat persona (producer.yaml)", expanded=True):
+        st.caption("Applies to new chat conversations and daily summaries.")
+        persona_system_val = st.text_area(
+            "System prompt",
+            value=persona_system(cfg, producer),
+            height=200,
+            key="settings_persona_system",
+        )
+        chat_model = st.text_input("OpenAI model", value=producer_model(cfg, producer), key="settings_chat_model")
+
+    prompts_data = None
+    prompts_error = ""
+    try:
+        prompts_data = load_prompts(cfg)
+    except (FileNotFoundError, ValueError) as err:
+        prompts_error = str(err)
+
+    summary_job = None
+    key_moments_job = None
+    if prompts_data is not None:
+        with st.expander("Summary prompt (prompts.yaml)", expanded=False):
+            st.caption(f"Template variables: {PROMPT_TEMPLATE_VARS}")
+            st.caption("Applies to the next confessional processed and --reanalyze runs.")
+            summary_job = _pipeline_job_editor(
+                "summary",
+                "summary",
+                get_auto_job(prompts_data, "summary"),
+            )
+
+        with st.expander("Key moments prompt (prompts.yaml)", expanded=False):
+            st.caption(f"Template variables: {PROMPT_TEMPLATE_VARS}")
+            st.caption("Applies to the next confessional processed and --reanalyze runs.")
+            key_moments_job = _pipeline_job_editor(
+                "key_moments",
+                "key moments",
+                get_auto_job(prompts_data, "key_moments"),
+            )
+    elif prompts_error:
+        st.error(f"Could not load prompts.yaml: {prompts_error}")
+
+    if st.button("Save settings", type="primary"):
+        prod_data = load_producer_config(cfg)
+        prod_data.setdefault("persona", {})["system"] = persona_system_val.strip()
+        if chat_model.strip():
+            prod_data["openai_model"] = chat_model.strip()
+        save_producer_config(cfg, prod_data)
+
+        if prompts_data is not None:
+            updated = dict(prompts_data)
+            jobs = list(updated.get("auto_jobs") or [])
+            patches = {j["id"]: j for j in (summary_job, key_moments_job) if j}
+            new_jobs = []
+            for job in jobs:
+                job_id = job.get("id")
+                if job_id in patches:
+                    merged = dict(job)
+                    merged.update(patches[job_id])
+                    new_jobs.append(merged)
+                else:
+                    new_jobs.append(job)
+            updated["auto_jobs"] = new_jobs
+            save_prompts(cfg, updated)
+
+        st.success("Saved — chat persona updated; pipeline prompts apply to the next confessional and re-analyze runs.")
 
 
 def _history_tab(cfg: dict):
@@ -212,6 +355,36 @@ def _fetch_transcript_md(file_id: str) -> str:
 
 def _video_file_id(row: dict[str, str]) -> str:
     return file_id_from_link(row.get("video_link", "")) or row.get("drive_file_id", "").strip()
+
+
+def _render_browse_transcript(body: str, key_moments_text: str) -> None:
+    moments = parse_key_moments(key_moments_text)
+
+    if is_timestamped_body(body):
+        lines = parse_timestamped_body(body)
+        aligned = align_moments_with_lines(lines, moments)
+        for browse_row in aligned:
+            left, right = st.columns([3, 2])
+            with left:
+                if browse_row.transcript:
+                    st.markdown(f"`{browse_row.time_label}` {browse_row.transcript}")
+            with right:
+                if browse_row.moment:
+                    m = browse_row.moment
+                    st.markdown(f"**{m.label}** — {m.description}")
+        return
+
+    left, right = st.columns([3, 2])
+    with left:
+        st.markdown("**Transcript**")
+        st.markdown(body)
+    with right:
+        st.markdown("**Key moments**")
+        if moments:
+            for m in moments:
+                st.markdown(f"**{m.label}** — {m.description}")
+        else:
+            st.caption("No key moments for this confessional.")
 
 
 def _browse_tab(cfg: dict):
@@ -276,16 +449,17 @@ def _browse_tab(cfg: dict):
         st.warning("Transcript file is empty.")
         return
 
+    parsed = parse_transcript_md(md)
     st.divider()
-    st.markdown(md)
+    _render_browse_transcript(parsed["body"], parsed["key_moments"])
 
 
 def main():
-    st.set_page_config(page_title="Producer chat", page_icon="🎬", layout="wide")
+    st.set_page_config(page_title=APP_TITLE, page_icon="🎬", layout="wide")
     cfg = _load_cfg()
     producer = load_producer_config(cfg)
 
-    st.title("Producer chat")
+    st.title(APP_TITLE)
     chat_tab, browse_tab, settings_tab, history_tab = st.tabs(["Chat", "Browse", "Settings", "History"])
     with chat_tab:
         _chat_tab(cfg, producer)

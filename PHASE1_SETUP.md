@@ -147,7 +147,7 @@ with timestamps** (embedded at the top of the transcript `.md` file on Drive).
    "prompts_file": "prompts.yaml",
    "openai_analysis_model": "gpt-4o-mini"
    ```
-3. Edit [`prompts.yaml`](prompts.yaml) to tune prompts — changes apply to the next confessional.
+3. Edit [`prompts.yaml`](prompts.yaml) to tune prompts — or use **Settings** in the Producer Console (summary + key moments).
 4. Run `python main.py --init-catalog` once to add the catalog `summary` column.
 
 Re-run analysis without re-transcribing (updates the existing `.md` on Drive):
@@ -158,9 +158,9 @@ python main.py --reanalyze --confessional-id <uuid-from-catalog>
 
 Analysis failures are logged but do not fail transcription.
 
-## Producer chat (Phase 2, Tailscale)
+## 32FRSFFL Producer Console (Phase 2, Tailscale)
 
-Interactive LLM chat for producers over **Streamlit**, reachable remotely via **Tailscale** with chat-only access (tailnet members cannot reach RDP, SMB, or other ports on this PC).
+Interactive **32FRSFFL Producer Console** (`producer_app.py`) for producers — Streamlit over **Tailscale** with chat-only access (tailnet members cannot reach RDP, SMB, or other ports on this PC).
 
 ### Install
 
@@ -200,7 +200,7 @@ Access is gated by **Tailscale** only (ACL + Serve). No app password.
 }
 ```
 
-This allows tailnet members to reach **only** HTTPS on the tagged machine (Tailscale Serve → producer chat). No other ports or devices are reachable.
+This allows tailnet members to reach **only** HTTPS on the tagged machine (Tailscale Serve → Producer Console). No other ports or devices are reachable.
 
 Leave **subnet routing**, **exit nodes**, and **Tailscale Funnel** disabled.
 
@@ -252,7 +252,9 @@ These changes do **not** affect web browsing, the scheduled transcriber, Drive/S
 
 **Chat tab** — pick scope (one confessional, all compact, or all full), then ask questions.
 
-**Settings tab** — edit producer persona / model; saves to `producer.yaml`.
+**Browse tab** — transcript and key moments in two columns (left: transcript, right: key moments). Existing confessionals show both side-by-side without row alignment. New confessionals export timestamped `[HH:MM:SS]` lines in the markdown body and align moments to matching transcript rows. Embedded Drive video above the transcript panel.
+
+**Settings tab** — edit chat persona (`producer.yaml`), **summary** and **key moments** pipeline prompts (`prompts.yaml`), and model. Pipeline prompt changes apply to the next confessional and `--reanalyze` runs.
 
 **History tab** — read saved conversations from the local `conversations/` folder.
 
@@ -296,8 +298,8 @@ PC must be on at the scheduled time.
 | Email notification failed | Enable Gmail API; delete `token.json` and re-run `--auth`; check `notification_emails` |
 | Analysis skipped / empty | Set `analysis_enabled: true`; check `prompts.yaml` exists; verify `OPENAI_API_KEY` |
 | Re-analyze fails | Catalog row needs `transcript_srt_link`; use confessional_id from Catalog tab |
-| Producer chat unreachable | PC awake; Tailscale connected; run `run_producer_app.bat`; check `tailscale serve status` |
-| Producer chat ACL denied | Machine tagged `tag:transcriber`; ACL allows `:443`; user invited to tailnet |
+| Producer Console unreachable | PC awake; Tailscale connected; run `run_producer_app.bat`; check `tailscale serve status` |
+| Producer Console ACL denied | Machine tagged `tag:transcriber`; ACL allows `:443`; user invited to tailnet |
 | Daily summary not emailed | Check `notification_emails`; Gmail API authorized; run `python producer_daily.py` manually |
 
 ## Moving to production later

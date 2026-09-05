@@ -36,6 +36,20 @@ def load_prompts(cfg: dict) -> dict[str, Any]:
     return data
 
 
+def save_prompts(cfg: dict, data: dict[str, Any]) -> None:
+    path = _prompts_path(cfg)
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+
+def get_auto_job(prompts: dict, job_id: str) -> dict[str, Any] | None:
+    """Return auto_jobs entry by id, or None."""
+    for job in prompts.get("auto_jobs", []):
+        if job.get("id") == job_id:
+            return job
+    return None
+
+
 def render_template(template: str, context: dict[str, str]) -> str:
     """Replace {key} placeholders; leave unknown keys as-is."""
 
