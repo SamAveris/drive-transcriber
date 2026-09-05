@@ -6,6 +6,7 @@ import os
 import sys
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 _REPO = os.path.dirname(os.path.abspath(__file__))
 if _REPO not in sys.path:
@@ -31,6 +32,12 @@ from analysis.producer_config import (  # noqa: E402
     persona_system,
     producer_model,
     save_producer_config,
+)
+from drive_client import (  # noqa: E402
+    file_id_from_link,
+    file_preview_embed_link,
+    get_drive_service,
+    read_file_text,
 )
 from main import load_config  # noqa: E402
 
@@ -196,15 +203,94 @@ def _history_tab(cfg: dict):
                 st.divider()
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _fetch_transcript_md(file_id: str) -> str:
+    cfg = _load_cfg()
+    service = get_drive_service(cfg)
+    return read_file_text(service, file_id)
+
+
+def _video_file_id(row: dict[str, str]) -> str:
+    return file_id_from_link(row.get("video_link", "")) or row.get("drive_file_id", "").strip()
+
+
+def _browse_tab(cfg: dict):
+    st.subheader("Transcripts")
+    rows = load_catalog_rows(cfg)
+    if not rows:
+        st.info("No ready confessionals in the catalog yet.")
+        return
+
+    rows = sorted(rows, key=lambda r: r.get("submitted_at", ""), reverse=True)
+    contestants = sorted({r.get("contestant") or "Unknown" for r in rows})
+    filter_name = st.selectbox("Filter by contestant", ["All"] + contestants, key="browse_contestant")
+    if filter_name != "All":
+        rows = [r for r in rows if (r.get("contestant") or "Unknown") == filter_name]
+    if not rows:
+        st.info("No confessionals for this contestant.")
+        return
+
+    labels = [
+        f"{r.get('contestant', '?')} — {r.get('submitted_at', '')[:16]}"
+        for r in rows
+    ]
+    idx = st.selectbox("Confessional", range(len(rows)), format_func=lambda i: labels[i], key="browse_pick")
+    row = rows[idx]
+
+    meta_col, links_col = st.columns(2)
+    with meta_col:
+        st.markdown(f"**Contestant:** {row.get('contestant') or 'Unknown'}")
+        st.markdown(f"**Submitted:** {row.get('submitted_at', '')}")
+        st.markdown(f"**Duration:** {row.get('duration', '')}")
+        if row.get("note", "").strip():
+            st.markdown(f"**Note:** {row.get('note', '').strip()}")
+        if row.get("summary", "").strip():
+            st.markdown(f"**Summary:** {row.get('summary', '').strip()}")
+    with links_col:
+        if row.get("video_link"):
+            st.markdown(f"[Open video on Drive]({row['video_link']})")
+        if row.get("transcript_md_link"):
+            st.markdown(f"[Open transcript on Drive]({row['transcript_md_link']})")
+
+    video_id = _video_file_id(row)
+    embed_url = file_preview_embed_link(video_id)
+    if embed_url:
+        st.markdown("**Confessional video**")
+        components.iframe(embed_url, height=480, scrolling=False)
+    elif row.get("video_link") or row.get("drive_file_id"):
+        st.caption("Video link present but could not build embed URL.")
+
+    file_id = file_id_from_link(row.get("transcript_md_link", ""))
+    if not file_id:
+        st.warning("No transcript markdown link in catalog for this confessional.")
+        return
+
+    with st.spinner("Loading transcript…"):
+        try:
+            md = _fetch_transcript_md(file_id)
+        except Exception as err:
+            st.error(f"Could not load transcript: {err}")
+            return
+
+    if not md.strip():
+        st.warning("Transcript file is empty.")
+        return
+
+    st.divider()
+    st.markdown(md)
+
+
 def main():
     st.set_page_config(page_title="Producer chat", page_icon="🎬", layout="wide")
     cfg = _load_cfg()
     producer = load_producer_config(cfg)
 
     st.title("Producer chat")
-    chat_tab, settings_tab, history_tab = st.tabs(["Chat", "Settings", "History"])
+    chat_tab, browse_tab, settings_tab, history_tab = st.tabs(["Chat", "Browse", "Settings", "History"])
     with chat_tab:
         _chat_tab(cfg, producer)
+    with browse_tab:
+        _browse_tab(cfg)
     with settings_tab:
         _settings_tab(cfg, producer)
     with history_tab:

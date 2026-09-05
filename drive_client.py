@@ -150,6 +150,13 @@ def file_view_link(file_id: str) -> str:
     return f"https://drive.google.com/file/d/{file_id}/view"
 
 
+def file_preview_embed_link(file_id: str) -> str:
+    """Google Drive embed URL for iframe video preview."""
+    if not file_id:
+        return ""
+    return f"https://drive.google.com/file/d/{file_id}/preview"
+
+
 def ensure_anyone_with_link_can_view(service, file_id: str):
     """Allow WhatsApp viewers to open the link without signing in."""
     try:
