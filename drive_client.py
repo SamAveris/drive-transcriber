@@ -31,6 +31,7 @@ __all__ = [
     "upload_transcript",
     "update_file_content",
     "file_view_link",
+    "file_preview_embed_link",
     "ensure_anyone_with_link_can_view",
     "mark_status",
     "clear_status",
