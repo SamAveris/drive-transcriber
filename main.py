@@ -11,6 +11,7 @@ Usage:
     python main.py --auth
     python main.py --init-catalog
     python main.py --reanalyze --confessional-id <uuid>
+    python main.py --resend-notifications [--since YYYY-MM-DD] [--dry-run]
 """
 
 import json
@@ -34,6 +35,7 @@ from catalog import (
     find_catalog_row_by_confessional_id,
     get_sheets_service,
     init_catalog_headers,
+    list_catalog_rows,
     sync_catalog_headers,
     upsert_catalog_row,
 )
@@ -72,7 +74,11 @@ from intake import (
     match_file_to_form,
 )
 from media_info import get_media_duration_seconds
-from notify import notification_recipients, notifications_enabled, send_confessional_notification
+from notify import (
+    notification_recipients,
+    notifications_enabled,
+    send_confessional_notification,
+)
 from transcribe import transcribe_video
 
 
@@ -370,6 +376,11 @@ def process_file(
                     print(f"[{name}] emailed {len(notification_recipients(cfg, contestant))} recipient(s)")
                 except Exception as err:
                     print(f"[{name}] email notification failed: {err}")
+                    if "invalid_grant" in str(err).lower():
+                        print(
+                            f"[{name}] OAuth token expired or revoked — "
+                            "delete token.json and run: python main.py --auth"
+                        )
 
     except Exception:
         print(f"[{name}] FAILED:")
@@ -519,6 +530,72 @@ def run_reanalyze(confessional_id: str, config_path: str):
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
+def run_resend_notifications(
+    config_path: str,
+    *,
+    since: str | None = None,
+    dry_run: bool = False,
+):
+    """Email WhatsApp copy for ready catalog rows (e.g. after OAuth was restored)."""
+    cfg = load_config(config_path)
+    if not notifications_enabled(cfg):
+        raise ValueError("Set notification_emails in config.json first.")
+    if not catalog_enabled(cfg):
+        raise ValueError("Set catalog_sheet_id in config.json first.")
+
+    sheets = get_sheets_service(cfg)
+    tab = cfg.get("catalog_tab", "Catalog")
+    rows = list_catalog_rows(sheets, cfg["catalog_sheet_id"], tab, status="ready")
+    if since:
+        rows = [r for r in rows if (r.get("submitted_at") or "")[:10] >= since]
+
+    sent = 0
+    skipped = 0
+    for row in rows:
+        contestant = row.get("contestant", "")
+        submitted = row.get("submitted_at", "")
+        video_link = row.get("video_link", "").strip()
+        msg = row.get("whatsapp_message", "").strip()
+        if not msg and video_link:
+            msg = build_whatsapp_message(
+                contestant,
+                submitted,
+                video_link,
+                row.get("summary", ""),
+            )
+        if not msg or not video_link:
+            print(f"Skip {contestant or '?'} ({submitted[:16]}): missing message or video link")
+            skipped += 1
+            continue
+        recipients = notification_recipients(cfg, contestant)
+        if not recipients:
+            print(f"Skip {contestant or '?'} ({submitted[:16]}): no recipients")
+            skipped += 1
+            continue
+        label = f"{contestant or 'Unknown'} — {submitted[:16]}"
+        if dry_run:
+            print(f"Would email {label} -> {len(recipients)} recipient(s)")
+            sent += 1
+            continue
+        try:
+            send_confessional_notification(
+                cfg,
+                contestant=contestant,
+                whatsapp_message=msg,
+                note=row.get("note", ""),
+                transcript_md_link=row.get("transcript_md_link", ""),
+                confessional_id=row.get("confessional_id", ""),
+            )
+            print(f"Emailed {label} -> {len(recipients)} recipient(s)")
+            sent += 1
+        except Exception as err:
+            print(f"Failed {label}: {err}")
+            skipped += 1
+
+    action = "Would send" if dry_run else "Sent"
+    print(f"{action} {sent} notification(s), skipped {skipped}.")
+
+
 def run_init_catalog(config_path: str):
     cfg = load_config(config_path)
     if not catalog_enabled(cfg):
@@ -589,6 +666,23 @@ if __name__ == "__main__":
             print("Usage: python main.py --reanalyze --confessional-id <uuid> [config.json]")
             sys.exit(1)
         run_reanalyze(confessional_id, config_path)
+    elif len(sys.argv) >= 2 and sys.argv[1] == "--resend-notifications":
+        config_path = "config.json"
+        since = None
+        dry_run = False
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] == "--since" and i + 1 < len(args):
+                since = args[i + 1]
+                i += 2
+            elif args[i] == "--dry-run":
+                dry_run = True
+                i += 1
+            else:
+                config_path = args[i]
+                i += 1
+        run_resend_notifications(config_path, since=since, dry_run=dry_run)
     elif len(sys.argv) >= 3 and sys.argv[1] == "--local-file":
         video_path = sys.argv[2]
         config_path = sys.argv[3] if len(sys.argv) > 3 else "config.json"

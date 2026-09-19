@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 _TIMESTAMP_RE = re.compile(r"^\[(\d{2}:\d{2}:\d{2})\]\s*(.+)$")
 _MOMENT_TS_RE = re.compile(r"\[(\d{2}:\d{2}:\d{2})\]")
+_CUT_PREFIX_RE = re.compile(r"^\[CUT\]\s*", re.IGNORECASE)
 
 
 def _clock_to_seconds(label: str) -> float:
@@ -19,6 +20,7 @@ class KeyMoment:
     seconds: float
     label: str
     description: str
+    include_in_cuts: bool = False
 
 
 @dataclass
@@ -37,7 +39,8 @@ class BrowseRow:
 
 def parse_transcript_md(md: str) -> dict[str, str]:
     """Split markdown into key_moments preamble section and body below ---."""
-    parts = re.split(r"\n---\n", md, maxsplit=1)
+    normalized = md.replace("\r\n", "\n")
+    parts = re.split(r"\n---\n", normalized, maxsplit=1)
     preamble = parts[0]
     body = parts[1].strip() if len(parts) > 1 else ""
 
@@ -52,7 +55,7 @@ def parse_transcript_md(md: str) -> dict[str, str]:
 
 
 def parse_key_moments(text: str) -> list[KeyMoment]:
-    """Extract [HH:MM:SS] moments and descriptions from key moments block."""
+    """Extract [HH:MM:SS] moments; optional [CUT] prefix for display."""
     if not text.strip():
         return []
 
@@ -63,6 +66,9 @@ def parse_key_moments(text: str) -> list[KeyMoment]:
             continue
         line = re.sub(r"^[-*•]\s*", "", line)
         line = re.sub(r"^\d+[.)]\s*", "", line)
+        include_in_cuts = bool(_CUT_PREFIX_RE.match(line))
+        if include_in_cuts:
+            line = _CUT_PREFIX_RE.sub("", line).strip()
         match = _MOMENT_TS_RE.search(line)
         if not match:
             continue
@@ -76,9 +82,15 @@ def parse_key_moments(text: str) -> list[KeyMoment]:
                 seconds=_clock_to_seconds(label),
                 label=label,
                 description=description,
+                include_in_cuts=include_in_cuts,
             )
         )
     return moments
+
+
+def format_moment_display(moment: KeyMoment) -> str:
+    cut = " **CUT**" if moment.include_in_cuts else ""
+    return f"**{moment.label}**{cut} — {moment.description}"
 
 
 def parse_timestamped_body(body: str) -> list[TranscriptLine]:

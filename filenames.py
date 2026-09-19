@@ -1,7 +1,8 @@
 import os
 from datetime import datetime, timezone
 
-_INVALID_CHARS = '<>:"/\\|?*'
+_INVALID_CHARS = '<>:"/\\|?*\''
+_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".wmv", ".flv"}
 
 
 def sanitize_filename(name: str) -> str:
@@ -13,9 +14,12 @@ def sanitize_filename(name: str) -> str:
 
 
 def safe_local_filename(name: str) -> str:
-    """Sanitize a full filename while preserving the extension."""
+    """Sanitize a full filename while preserving a known video extension."""
     base, ext = os.path.splitext(os.path.basename(name))
-    return sanitize_filename(base) + ext.lower()
+    ext_lower = ext.lower()
+    if ext_lower in _VIDEO_EXTENSIONS:
+        return sanitize_filename(base) + ext_lower
+    return sanitize_filename(base + ext)
 
 
 def _parse_datetime(value: str) -> datetime | None:

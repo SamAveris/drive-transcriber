@@ -252,7 +252,7 @@ These changes do **not** affect web browsing, the scheduled transcriber, Drive/S
 
 **Chat tab** — pick scope (one confessional, all compact, or all full), then ask questions.
 
-**Browse tab** — transcript and key moments in two columns (left: transcript, right: key moments). Existing confessionals show both side-by-side without row alignment. New confessionals export timestamped `[HH:MM:SS]` lines in the markdown body and align moments to matching transcript rows. Embedded Drive video above the transcript panel.
+**Browse tab** — transcript and key moments from the Drive markdown (read-only), with embedded Drive video. Timestamped confessionals show moments aligned beside matching transcript lines; older plain-text transcripts show the full body on the left and key moments on the right.
 
 **Settings tab** — edit chat persona (`producer.yaml`), **summary** and **key moments** pipeline prompts (`prompts.yaml`), and model. Pipeline prompt changes apply to the next confessional and `--reanalyze` runs.
 

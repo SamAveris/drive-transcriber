@@ -91,6 +91,7 @@ from drive_client import (  # noqa: E402
 )
 from formats.browse_view import (  # noqa: E402
     align_moments_with_lines,
+    format_moment_display,
     is_timestamped_body,
     parse_key_moments,
     parse_timestamped_body,
@@ -353,10 +354,6 @@ def _fetch_transcript_md(file_id: str) -> str:
     return read_file_text(service, file_id)
 
 
-def _video_file_id(row: dict[str, str]) -> str:
-    return file_id_from_link(row.get("video_link", "")) or row.get("drive_file_id", "").strip()
-
-
 def _render_browse_transcript(body: str, key_moments_text: str) -> None:
     moments = parse_key_moments(key_moments_text)
 
@@ -370,8 +367,7 @@ def _render_browse_transcript(body: str, key_moments_text: str) -> None:
                     st.markdown(f"`{browse_row.time_label}` {browse_row.transcript}")
             with right:
                 if browse_row.moment:
-                    m = browse_row.moment
-                    st.markdown(f"**{m.label}** — {m.description}")
+                    st.markdown(format_moment_display(browse_row.moment))
         return
 
     left, right = st.columns([3, 2])
@@ -381,10 +377,14 @@ def _render_browse_transcript(body: str, key_moments_text: str) -> None:
     with right:
         st.markdown("**Key moments**")
         if moments:
-            for m in moments:
-                st.markdown(f"**{m.label}** — {m.description}")
+            for moment in moments:
+                st.markdown(format_moment_display(moment))
         else:
             st.caption("No key moments for this confessional.")
+
+
+def _video_file_id(row: dict[str, str]) -> str:
+    return file_id_from_link(row.get("video_link", "")) or row.get("drive_file_id", "").strip()
 
 
 def _browse_tab(cfg: dict):
